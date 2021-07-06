@@ -16,8 +16,8 @@ module.exports = {
   registerWithdrawal,
   getWithdrawalStatus,
   getRegisteredWithdrawals,
-  registerSignedTaxPayout,
-  getRegisteredSignedTaxPayouts,
+  registerApprovedTaxPayout,
+  getRegisteredApprovedTaxPayouts,
   registerPayoutRequest,
   getRegisteredPayoutRequests
 };
@@ -100,16 +100,16 @@ function getRegisteredWithdrawals() {
   );
 }
 
-function registerSignedTaxPayout(address, amount, at) {
+function registerApprovedTaxPayout(address, amount, at) {
   return util.promisify(db.run.bind(db))(
-    'INSERT INTO signedTaxPayouts (address, amount, at) VALUES (?, ?, ?)',
+    'INSERT INTO approvedTaxPayouts (address, amount, at) VALUES (?, ?, ?)',
     [address, amount, at]
   );
 }
 
-function getRegisteredSignedTaxPayouts() {
+function getRegisteredApprovedTaxPayouts() {
   return util.promisify(db.all.bind(db))(
-    'SELECT (address, amount, at) FROM signedTaxPayouts'
+    'SELECT (address, amount, at) FROM approvedTaxPayouts'
   );
 }
 
