@@ -202,9 +202,6 @@ contract BEP20Token is Context, IBEP20, Ownable {
   // Harcoded initial configurations. These are subjected to change with the configure() call.
   // DO NOT RELY ON THESE HARDCODED VALUES. Invoke the necessary getters to get the latest values.
   address[] private _authorityAddresses = [
-    0x4aD13Eb83f132D6aaBAef25f7A1F45397cDdd65d,
-    0xa04e2A329e1612120c481E4DcA39B13Ae1CC1FEd,
-    0xd774Ddde4b5879837E715a8631F8795ef0f2AaCb
   ];
   uint256 private _authorityThreshold = 2;
   uint256 private _minBurnAmount = 1000000000;
