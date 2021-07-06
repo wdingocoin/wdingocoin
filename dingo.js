@@ -7,13 +7,13 @@ const os = require("os");
 const DINGO_COOKIE_PATH = '~/.dingocoin/.cookie'.replace('~', os.homedir);
 const DINGO_PORT = 34646;
 const DEPOSIT_CONFIRMATIONS = 0;
-const DECIMALS = 8;
 
 module.exports = {
   DEPOSIT_CONFIRMATIONS,
   toSatoshi,
   fromSatoshi,
   walletPassphrase,
+  verifyAddress,
   getTransaction,
   getNewAddress,
   addMultisigAddress,
@@ -23,7 +23,8 @@ module.exports = {
   getReceivedAmountByAddresses,
   listUnspent,
   createRawTransaction,
-  isCorrectRawTransaction,
+  verifyRawTransaction,
+  createPayoutRawTransaction,
   decodeRawTranscation,
   signRawTransaction,
   sendRawTranscation
@@ -72,6 +73,10 @@ async function callRpc(method, params) {
       }
     });
   });
+}
+
+async function verifyAddress(address) {
+  return (await callRpc('validateaddress', address)).isvalid;
 }
 
 function walletPassphrase(passphrase) {
@@ -128,46 +133,56 @@ function listUnspent(addresses, changeAddress) {
   return callRpc('listunspent', [0, 9999999, addresses.concat([changeAddress])]);
 }
 
-async function createRawTransaction(unspent, changeAddress, address, amount, fee, data) {
+function createRawTransaction(unspent, changeAddress, address, amount, fee, data) {
   const unspentTotal = unspent.reduce((a, b) => a + BigInt(toSatoshi(b.amount.toString())), BigInt(0));
   const change = unspentTotal - BigInt(amount);
   if (change < 0) {
+    console.log(unspentTotal, amount);
     throw new Error('Insufficient funds');
   }
 
-  const amountAfterFee = BigInt(amount) - BigInt(toSatoshi(fee)); // Fee is subtracted from amount.
-  if (amountAfterFee < 0) {
-    throw new Error('Insufficient amount for fee');
+  const taxAmount = BigInt(amount) / 100n;
+  const amountAfterTax = BigInt(amount) - taxAmount;
+  const amountAfterTaxAndFee = amountAfterTax - BigInt(toSatoshi(fee));
+  if (amountAfterTaxAndFee < 0) {
+    throw new Error('Insufficient amount for tax and fee');
   }
-
-  const taxAmount = amountAfterFee / 100n;
-  const amountAfterFeeAndTax = amountAfterFee - taxAmount;
 
   const hash = crypto.createHash('sha256');
   hash.update(JSON.stringify(data));
 
   const dict = {};
   dict['data'] = hash.digest('hex');
-  dict[address] = fromSatoshi(amountAfterFeeAndTax.toString());
+  dict[address] = fromSatoshi(amountAfterTaxAndFee.toString());
   dict[changeAddress] = fromSatoshi((change + taxAmount).toString());
   return callRpc('createrawtransaction', [unspent, dict]);
 }
 
-async function isCorrectRawTransaction(unspent, changeAddress, address, amount, fee, data, hex) {
+function getDataVout(vouts) {
+  const entries = vouts.filter((x) => x.scriptPubKey.type === 'nulldata');
+  if (entries.length !== 1) {
+    throw new Error('Data unfound or invalid in vouts');
+  }
+  return entries[0];
+}
+
+function getAddressVout(vouts, address) {
+  const entries = vouts.filter((x) => (x.scriptPubKey.type === 'scripthash' || x.scriptPubKey.type === 'pubkeyhash') && x.scriptPubKey.addresses.length === 1 && x.scriptPubKey.addresses[0] === address);
+  if (entries.length !== 1) {
+    throw new Error('Address unfound or invalid in vouts');
+  }
+  return entries[0];
+}
+
+async function verifyRawTransaction(unspent, changeAddress, address, amount, fee, data, hex) {
   // Verify structure.
   const transaction = await decodeRawTranscation(hex);
   if (transaction.vout.length !== 3) {
     return false;
   }
-  const dataOuts = transaction.vout.filter((x) => x.scriptPubKey.type === 'nulldata');
-  const destinationOuts = transaction.vout.filter((x) => x.scriptPubKey.type in ['scripthash', 'pubkeyhash'] && x.scriptPubKey.addresses.length === 1 && x.scriptPubKey.addresses[0] === address);
-  const changeOuts = transaction.vout.filter((x) => x.scriptPubKey.type === ['scripthash', 'pubkeyhash'] && x.scriptPubKey.addresses.length === 1 && x.scriptPubKey.addresses[0] === changeAddress);
-  if (dataOuts.length !== 1 || destinationOuts.length !== 1 || changeOuts.length !== 1) {
-    return false;
-  }
-  const dataOut = dataOuts[0];
-  const destinationOut = destinationOuts[0];
-  const changeOut = changeOuts[0];
+  const dataOut = getDataVout(transaction.vout);
+  const destinationOut = getAddressVout(transaction.vout, address);
+  const changeOut = getAddressVout(transaction.vout, changeAddress);
 
   // Verify hash.
   const hash = crypto.createHash('sha256');
@@ -182,13 +197,15 @@ async function isCorrectRawTransaction(unspent, changeAddress, address, amount, 
   if (change <= 0) {
     throw new Error('Insufficient funds');
   }
-  const amountAfterFee = BigInt(amount) - BigInt(toSatoshi(f));
-  if (amountAfterFee < 0) {
-    throw new Error('Insufficient amount for fee');
+
+  const taxAmount = BigInt(amount) / 100n;
+  const amountAfterTax = BigInt(amount) - taxAmount;
+  const amountAfterTaxAndFee = amountAfterTax - BigInt(toSatoshi(fee));
+  if (amountAfterTaxAndFee < 0) {
+    throw new Error('Insufficient amount for tax and fee');
   }
-  const taxAmount = amountAfterFee / 100n;
-  const amountAfterFeeAndTax = amountAfterFee - taxAmount;
-  if (toSatoshi(destinationOut.value) !== amountAfterFeeAndTax.toString()) {
+
+  if (toSatoshi(destinationOut.value) !== amountAfterTaxAndFee.toString()) {
     return false;
   }
   if (toSatoshi(changeOut.value) !== (change + taxAmount).toString()) {
@@ -196,6 +213,63 @@ async function isCorrectRawTransaction(unspent, changeAddress, address, amount, 
   }
 
   return true;
+}
+
+function createPayoutRawTransaction(unspent, changeAddress, addresses, amount, fee) {
+  const unspentTotal = unspent.reduce((a, b) => a + BigInt(toSatoshi(b.amount.toString())), BigInt(0));
+  const change = unspentTotal - BigInt(amount);
+  if (change < 0) {
+    throw new Error('Insufficient funds');
+  }
+  const amountAfterFee = BigInt(amount) - BigInt(toSatoshi(fee)); // Fee is subtracted from amount.
+  if (amountAfterFee < 0) {
+    throw new Error('Insufficient amount for fee');
+  }
+  // Round down.
+  const amountPerPayee = amountAfterFee / BigInt(addresses.length);
+  const spare = amountAfterFee - (amountPerPayee * BigInt(addresses.length));
+
+  const dict = {};
+  for (const address of addresses) {
+    dict[address] = fromSatoshi(amountPerPayee.toString());
+  }
+  dict[changeAddress] = fromSatoshi((change + spare).toString());
+  return callRpc('createrawtransaction', [unspent, dict]);
+}
+
+async function verifyPayoutRawTransaction(unspent, changeAddress, addresses, amount, fee, hex) {
+  const unspentTotal = unspent.reduce((a, b) => a + BigInt(toSatoshi(b.amount.toString())), BigInt(0));
+  const change = unspentTotal - BigInt(amount);
+  if (change < 0) {
+    throw new Error('Insufficient funds');
+  }
+  const amountAfterFee = BigInt(amount) - BigInt(toSatoshi(fee)); // Fee is subtracted from amount.
+  if (amountAfterFee < 0) {
+    throw new Error('Insufficient amount for fee');
+  }
+  // Round down.
+  const amountPerPayee = amountAfterFee / BigInt(addresses.length);
+  const spare = amountAfterFee - (amountPerPayee * BigInt(addresses.length));
+
+  // Verify structure.
+  const transaction = await decodeRawTranscation(hex);
+  if (transaction.vout.length !== changeAddresses.length + 1) {
+    return false;
+  }
+  for (const i in transaction.vout) {
+    if (i < transaction.vout.length - 1) {
+      const vout = getAddressVout(transaction.vout, addresses[i]);
+      if (vout.value !== fromSatoshi(amountPerPayee.toString())) {
+        return false;
+      }
+    } else {
+      const vout = getAddressVout(transaction.vout, changeAddress);
+      if (vout.value !== fromSatoshi((change + spare).toString())) {
+        return false;
+      }
+    }
+  }
+
 }
 
 function decodeRawTranscation(hex) {

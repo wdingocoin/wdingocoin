@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS approvedWithdrawals (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_approvedWithdrawals_burnAddress_burnIndex ON approvedWithdrawals (burnAddress, burnIndex);
 
 DROP TABLE IF EXISTS payoutRequests;
-CREATE TABLE IF EXISTS payoutRequests (
+CREATE TABLE IF NOT EXISTS payoutRequests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   requester TEXT NOT NULL,
   requestedAt TEXT NOT NULL,

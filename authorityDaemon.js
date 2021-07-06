@@ -71,6 +71,7 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
   const smartContractSettings = JSON.parse(fs.readFileSync(`${settingsFolder}/smartContract.json`));
   const publicSettings = JSON.parse(fs.readFileSync(`${settingsFolder}/public.json`));
   const privateSettings = JSON.parse(fs.readFileSync(`${settingsFolder}/private.DO_NOT_SHARE_THIS.json`));
+  const dingoSettings = JSON.parse(fs.readFileSync(`${settingsFolder}/dingo.json`));
 
   smartContract.loadProvider(smartContractSettings.provider);
   smartContract.loadContract(smartContractSettings.contractAbi, smartContractSettings.contractAddress);
@@ -224,7 +225,7 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
     const data = req.body;
     const burnAddress = data.burnAddress;
     const burnIndex = data.burnIndex;
-    const approvalChain = data.approvalChain;
+    let approvalChain = data.approvalChain;
     if (!smartContract.isAddress(burnAddress)) {
       throw new Error('burnAddress missing or invalid');
     }
@@ -236,37 +237,34 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
 
       const { burnDestination, burnAmount } = await smartContract.getBurnHistory(burnAddress, burnIndex);
 
+      // Compute unspent.
       const received = await dingo.listReceivedByAddress();
       const registeredMintDepositAddresses = (await database.getRegisteredMintDepositAddresses()).map((x) => x.depositAddress);
       const nonEmptyMintDepositAddresses = registeredMintDepositAddresses.filter((x) => x in received);
-      const unspent = await dingo.listUnspent(nonEmptyMintDepositAddresses, publicSettings.changeAddress);
+      const unspent = await dingo.listUnspent(nonEmptyMintDepositAddresses, dingoSettings.changeAddress);
 
+      // Create raw transaction if not exists.
       if (approvalChain === null || approvalChain === undefined || approvalChain === '') {
         const transactionHex = await dingo.createRawTransaction(
-          unspent, publicSettings.changeAddress, burnDestination, burnAmount, publicSettings.fee,
+          unspent, dingoSettings.changeAddress, burnDestination, burnAmount, dingoSettings.fee,
           { burnAddress: burnAddress, burnIndex: burnIndex });
-
-        await database.registerApprovedWithdrawal(burnAddress, burnIndex);
-        const signedTransactionHex = (await dingo.signRawTransaction(transactionHex)).hex;
-
-        res.send(createSignedMessage({
-          approvalChain: signedTransactionHex
-        }));
-      } else {
-        if (!dingo.isCorrectRawTransaction(
-          unspent, publicSettings.changeAddress, burnDestination, burnAmount, publicSettings.fee,
-          { burnAddress: burnAddress, burnIndex: burnIndex }, approvalChain)) {
-          throw new Error('Consensus failure on withdrawal details');
-        }
-
-        await database.registerApprovedWithdrawal(burnAddress, burnIndex);
-
-        const signedTransactionHex = (await dingo.signRawTransaction(approvalChain)).hex;
-
-        res.send(createSignedMessage({
-          approvalChain: signedTransactionHex
-        }));
+        approvalChain = transactionHex;
       }
+
+      // Verify.
+      if (!dingo.verifyRawTransaction(
+        unspent, dingoSettings.changeAddress, burnDestination, burnAmount, dingoSettings.fee,
+        { burnAddress: burnAddress, burnIndex: burnIndex }, approvalChain)) {
+        throw new Error('Consensus failure on withdrawal details');
+      }
+
+      // Register and approve.
+      await database.registerApprovedWithdrawal(burnAddress, burnIndex);
+      const signedTransactionHex = (await dingo.signRawTransaction(approvalChain)).hex;
+
+      res.send(createSignedMessage({
+        approvalChain: signedTransactionHex
+      }));
     });
   });
 
@@ -283,13 +281,10 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
 
   const computeStats = async () => {
 
-    // Read deposit addresses and approved withdrawals.
-    const { registeredMintDepositAddresses, registeredApprovedWithdrawals } = await database.acquire(async () => {
-      return {
-        registeredMintDepositAddresses: await database.getRegisteredMintDepositAddresses(),
-        registeredApprovedWithdrawals: await database.getRegisteredApprovedWithdrawals()
-      };
-    });
+    // Read from database.
+    const registeredMintDepositAddresses = await database.getRegisteredMintDepositAddresses();
+    const registeredApprovedWithdrawals = await database.getRegisteredApprovedWithdrawals();
+    const registeredPayoutRequests = await database.getRegisteredPayoutRequests('approved');
 
     // Fetch deposited by addresses.
     const deposited = await dingo.getReceivedAmountByAddresses(registeredMintDepositAddresses.map((x) => x.depositAddress));
@@ -303,20 +298,45 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
       registeredApprovedWithdrawals.map((x) => x.burnAddress),
       registeredApprovedWithdrawals.map((x) => x.burnIndex)
     );
-    // Compute burn statistics.
-    const totalBurnedAmount = burnAmounts.reduce((a, b) => a + BigInt(b.burnAmount), 0n);
-    const totalBurnedTaxAmount = burnAmounts.reduce((a, b) => a + BigInt(b.burnAmount) / 100n, 0n);
-    const totalBurnedWithdrawableAmount = totalBurnedAmount - totalBurnedTaxAmount;
+    // Compute withdraw statistics.
+    const totalWithdrawnAmount = burnAmounts.reduce((a, b) => a + BigInt(b), 0n);
+    const totalWithdrawnTaxAmount = burnAmounts.reduce((a, b) => a + BigInt(b) / 100n, 0n);
+    const totalWithdrawnFinalAmount = totalWithdrawnAmount - totalWithdrawnTaxAmount;
+
+    // Compute unspent.
+    const received = await dingo.listReceivedByAddress();
+    const nonEmptyMintDepositAddresses = registeredMintDepositAddresses.filter((x) => x in received);
+    const unspent = await dingo.listUnspent(nonEmptyMintDepositAddresses, dingoSettings.changeAddress);
+    const totalUnspent = unspent.reduce((a, b) => a + BigInt(dingo.toSatoshi(b.amount.toString())), BigInt(0));
+
+    const totalExpectedUnspent = totalDepositedAmount - totalWithdrawnFinalAmount;
 
     return {
       totalDepositedAmount: totalDepositedAmount,
+      totalDepositedTaxAmount: totalDepositedTaxAmount,
       totalDepositedMintableAmount: totalDepositedMintableAmount,
-      totalDepositedTaxAmount: totalBurnedTaxAmount,
-      totalBurnedAmount: totalBurnedAmount,
-      totalBurnedWithdrawableAmount: totalBurnedWithdrawableAmount,
-      totalBurnedTaxAmount: totalBurnedTaxAmount
+      totalWithdrawnAmount: totalWithdrawnAmount,
+      totalWithdrawnTaxAmount: totalWithdrawnTaxAmount,
+      totalWithdrawnFinalAmount: totalWithdrawnFinalAmount,
+      totalUnspent: totalUnspent,
+      totalExpectedUnspent: totalExpectedUnspent
     }
+
   };
+
+  app.post('/requestPayout', ipfilter(['127.0.0.1']), async (req, res) => {
+    // Compute unspent.
+    const received = await dingo.listReceivedByAddress();
+    const registeredMintDepositAddresses = (await database.getRegisteredMintDepositAddresses()).map((x) => x.depositAddress);
+    const nonEmptyMintDepositAddresses = registeredMintDepositAddresses.filter((x) => x in received);
+    const unspent = await dingo.listUnspent(nonEmptyMintDepositAddresses, dingoSettings.changeAddress);
+
+    // Create raw transaction.
+    const raw = await dingo.createPayoutRawTransaction(
+        unspent, dingoSettings.changeAddress, dingoSettings.payoutAddresses,
+        '10000000000', dingoSettings.fee);
+    console.log(await dingo.decodeRawTranscation(raw));
+  });
 
   app.post('/approvePayout',
     ipfilter(publicSettings.authorityNodes.map((x) => x.location).concat(['127.0.0.1'])),
@@ -329,14 +349,21 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
     }
   );
 
-  app.get('/stats', rateLimit({ windowMs: 1000, max: 1 }), async (req, res) => {
+  app.post('/stats', rateLimit({ windowMs: 1000, max: 1 }), async (req, res) => {
     const s = await computeStats();
-    console.log(dingo.fromSatoshi(s.totalDepositedAmount.toString()));
-    console.log(dingo.fromSatoshi(s.totalDepositedMintableAmount.toString()));
-    console.log(dingo.fromSatoshi(s.totalDepositedTaxAmount.toString()));
-    console.log(dingo.fromSatoshi(s.totalBurnedAmount.toString()));
-    console.log(dingo.fromSatoshi(s.totalBurnedWithdrawableAmount.toString()));
-    console.log(dingo.fromSatoshi(s.totalBurnedTaxAmount.toString()));
+
+    console.log('==================================');
+    console.log('Total deposited (coins): ' + dingo.fromSatoshi(s.totalDepositedAmount.toString()));
+    console.log('Total tax from deposits (coins): ' + dingo.fromSatoshi(s.totalDepositedTaxAmount.toString()));
+    console.log('Total mintable (tokens): ' + dingo.fromSatoshi(s.totalDepositedMintableAmount.toString()));
+    console.log('-----');
+    console.log('Total withdrawn (tokens): ' + dingo.fromSatoshi(s.totalWithdrawnAmount.toString()));
+    console.log('Total tax from withdrawals (coins): ' + dingo.fromSatoshi(s.totalWithdrawnTaxAmount.toString()));
+    console.log('Total withdrawn post-tax (coins): ' + dingo.fromSatoshi(s.totalWithdrawnFinalAmount.toString()));
+    console.log('-----');
+    console.log('Total unspent (coins): ' + dingo.fromSatoshi(s.totalUnspent.toString()));
+    console.log('Total expected unspent (coins): ' + dingo.fromSatoshi(s.totalExpectedUnspent.toString()));
+    console.log('==================================');
   });
 
   app.listen(publicSettings.port, () => {

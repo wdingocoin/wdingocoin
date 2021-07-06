@@ -47,7 +47,8 @@ async function registerUsedDepositAddresses(depositAddresses) {
 function registerMintDepositAddress(mintAddress, depositAddress) {
   return util.promisify(db.run.bind(db))(
     'INSERT INTO mintDepositAddresses (mintAddress, depositAddress) VALUES (?, ?)',
-    [mintAddress, depositAddress]);
+    [mintAddress, depositAddress]
+  );
 }
 
 async function getMintDepositAddress(mintAddress) {
@@ -73,7 +74,8 @@ function getRegisteredMintDepositAddresses() {
 function registerApprovedWithdrawal(burnAddress, burnIndex) {
   return util.promisify(db.run.bind(db))(
     'INSERT INTO approvedWithdrawals (burnAddress, burnIndex) VALUES (?, ?)',
-    [burnAddress, burnIndex]);
+    [burnAddress, burnIndex]
+  );
 }
 
 async function hasApprovedWithdrawal(burnAddress, burnIndex) {
@@ -92,11 +94,19 @@ function getRegisteredApprovedWithdrawals() {
 function registerPayoutRequest(requester, requestedAt, data, result) {
   return util.promisify(db.run.bind(db))(
     'INSERT INTO payoutRequests (requester, requestedAt, data, result) VALUES (?, ?, ?, ?)',
-    [requester, requestedAt, data, result]);
+    [requester, requestedAt, data, result]
+  );
 }
 
-function getRegisteredPayoutRequests() {
-  return util.promisify(db.all.bind(db))(
-    `SELECT requester, requestedAt, data, result FROM payoutRequests`
-  );
+function getRegisteredPayoutRequests(filterResult) {
+  if (filterResult === null || filterResult === undefined || filterResult === '') {
+    return util.promisify(db.all.bind(db))(
+      `SELECT requester, requestedAt, data, result FROM payoutRequests`
+    );
+  } else {
+    return util.promisify(db.all.bind(db))(
+      `SELECT requester, requestedAt, data, result FROM payoutRequests WHERE result=?`,
+      [filterResult]
+    );
+  }
 }
