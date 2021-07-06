@@ -94,10 +94,17 @@ async function getWithdrawalStatus(burnAddress, burnIndex) {
   return result[0].status;
 }
 
-function getRegisteredWithdrawals() {
-  return util.promisify(db.all.bind(db))(
-    `SELECT burnAddress, burnIndex, status FROM withdrawals`
-  );
+function getRegisteredWithdrawals(filterStatus) {
+  if (filterStatus === undefined) {
+    return util.promisify(db.all.bind(db))(
+      `SELECT burnAddress, burnIndex, status FROM withdrawals`
+    );
+  } else {
+    return util.promisify(db.all.bind(db))(
+      `SELECT burnAddress, burnIndex, status FROM withdrawals WHERE status=?`,
+      [filterStatus]
+    );
+  }
 }
 
 function registerApprovedTaxPayout(address, amount, at) {

@@ -10,6 +10,7 @@ module.exports = {
   loadProvider,
   loadContract,
   loadAccount,
+  getAccountAddress,
   sign,
   verify,
   getAuthorityAddresses,
@@ -41,6 +42,10 @@ function loadContract(contractAbi, contractAddress) {
 
 function loadAccount(privateKey) {
   account = web3.eth.accounts.privateKeyToAccount(privateKey);
+}
+
+function getAccountAddress() {
+  return account.address;
 }
 
 function sign(message) {
