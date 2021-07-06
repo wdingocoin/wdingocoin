@@ -13,9 +13,11 @@ module.exports = {
   registerMintDepositAddress,
   getMintDepositAddress,
   getRegisteredMintDepositAddresses,
-  registerApprovedWithdrawal,
-  hasApprovedWithdrawal,
-  getRegisteredApprovedWithdrawals,
+  registerWithdrawal,
+  getWithdrawalStatus,
+  getRegisteredWithdrawals,
+  registerSignedTaxPayout,
+  getRegisteredSignedTaxPayouts,
   registerPayoutRequest,
   getRegisteredPayoutRequests
 };
@@ -71,23 +73,43 @@ function getRegisteredMintDepositAddresses() {
   );
 }
 
-function registerApprovedWithdrawal(burnAddress, burnIndex) {
+function registerWithdrawal(burnAddress, burnIndex) {
   return util.promisify(db.run.bind(db))(
-    'INSERT INTO approvedWithdrawals (burnAddress, burnIndex) VALUES (?, ?)',
+    'INSERT INTO withdrawals (burnAddress, burnIndex) VALUES (?, ?)',
     [burnAddress, burnIndex]
   );
 }
 
-async function hasApprovedWithdrawal(burnAddress, burnIndex) {
-  return (await util.promisify(db.get.bind(db))(
-    `SELECT COUNT(*) from approvedWithdrawals WHERE burnAddress=? AND burnIndex=?`,
+async function getWithdrawalStatus(burnAddress, burnIndex) {
+  const result = await util.promisify(db.all.bind(db))(
+    `SELECT status from withdrawals WHERE burnAddress=? AND burnIndex=?`,
     [burnAddress, burnIndex]
-  ))['COUNT(*)'] > 0;
+  );
+  if (result.length === 0) {
+    return null;
+  }
+  if (result.length !== 1) {
+    throw new Error('Withdrawal duplicated on (burnAddress, burnIndex)');
+  }
+  return result[0].status;
 }
 
-function getRegisteredApprovedWithdrawals() {
+function getRegisteredWithdrawals() {
   return util.promisify(db.all.bind(db))(
-    `SELECT burnAddress, burnIndex FROM approvedWithdrawals`
+    `SELECT burnAddress, burnIndex, status FROM withdrawals`
+  );
+}
+
+function registerSignedTaxPayout(address, amount, at) {
+  return util.promisify(db.run.bind(db))(
+    'INSERT INTO signedTaxPayouts (address, amount, at) VALUES (?, ?, ?)',
+    [address, amount, at]
+  );
+}
+
+function getRegisteredSignedTaxPayouts() {
+  return util.promisify(db.all.bind(db))(
+    'SELECT (address, amount, at) FROM signedTaxPayouts'
   );
 }
 

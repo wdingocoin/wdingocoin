@@ -6,7 +6,7 @@ const os = require("os");
 
 const DINGO_COOKIE_PATH = '~/.dingocoin/.cookie'.replace('~', os.homedir);
 const DINGO_PORT = 34646;
-const DEPOSIT_CONFIRMATIONS = 0;
+const DEPOSIT_CONFIRMATIONS = 5;
 
 module.exports = {
   DEPOSIT_CONFIRMATIONS,
@@ -25,6 +25,7 @@ module.exports = {
   createRawTransaction,
   verifyRawTransaction,
   createPayoutRawTransaction,
+  verifyPayoutRawTransaction,
   decodeRawTranscation,
   signRawTransaction,
   sendRawTranscation
@@ -76,7 +77,7 @@ async function callRpc(method, params) {
 }
 
 async function verifyAddress(address) {
-  return (await callRpc('validateaddress', address)).isvalid;
+  return (await callRpc('validateaddress', [address])).isvalid;
 }
 
 function walletPassphrase(passphrase) {
@@ -178,7 +179,7 @@ async function verifyRawTransaction(unspent, changeAddress, address, amount, fee
   // Verify structure.
   const transaction = await decodeRawTranscation(hex);
   if (transaction.vout.length !== 3) {
-    return false;
+    throw new Error('Incorrect transaction structure');
   }
   const dataOut = getDataVout(transaction.vout);
   const destinationOut = getAddressVout(transaction.vout, address);
@@ -188,7 +189,7 @@ async function verifyRawTransaction(unspent, changeAddress, address, amount, fee
   const hash = crypto.createHash('sha256');
   hash.update(JSON.stringify(data));
   if (dataOut.scriptPubKey.hex !== hash.digest('hex')) {
-    return false;
+    throw new Error('Incorrect transaction data');
   }
 
   // Verify amount.
@@ -205,14 +206,12 @@ async function verifyRawTransaction(unspent, changeAddress, address, amount, fee
     throw new Error('Insufficient amount for tax and fee');
   }
 
-  if (toSatoshi(destinationOut.value) !== amountAfterTaxAndFee.toString()) {
-    return false;
+  if (toSatoshi(destinationOut.value.toString()) !== amountAfterTaxAndFee.toString()) {
+    throw new Error('Incorrect transaction amount');
   }
-  if (toSatoshi(changeOut.value) !== (change + taxAmount).toString()) {
-    return false;
+  if (toSatoshi(changeOut.value.toString()) !== (change + taxAmount).toString()) {
+    throw new Error('Incorrect transaction amount');
   }
-
-  return true;
 }
 
 function createPayoutRawTransaction(unspent, changeAddress, addresses, amount, fee) {
@@ -253,23 +252,22 @@ async function verifyPayoutRawTransaction(unspent, changeAddress, addresses, amo
 
   // Verify structure.
   const transaction = await decodeRawTranscation(hex);
-  if (transaction.vout.length !== changeAddresses.length + 1) {
-    return false;
+  if (transaction.vout.length !== addresses.length + 1) {
+    throw new ('Incorrect payout structure');
   }
   for (const i in transaction.vout) {
     if (i < transaction.vout.length - 1) {
       const vout = getAddressVout(transaction.vout, addresses[i]);
-      if (vout.value !== fromSatoshi(amountPerPayee.toString())) {
-        return false;
+      if (toSatoshi(vout.value.toString()) !== amountPerPayee.toString()) {
+        throw new Error('Incorrect payout amount');
       }
     } else {
       const vout = getAddressVout(transaction.vout, changeAddress);
-      if (vout.value !== fromSatoshi((change + spare).toString())) {
-        return false;
+      if (toSatoshi(vout.value.toString()) !== (change + spare).toString()) {
+        throw new Error('Incorrect payout amount');
       }
     }
   }
-
 }
 
 function decodeRawTranscation(hex) {

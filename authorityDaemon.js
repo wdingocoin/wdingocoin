@@ -8,6 +8,7 @@ const fs = require('fs');
 const axios = require('axios');
 const rateLimit = require("express-rate-limit");
 const ipfilter = require('express-ipfilter').IpFilter
+const morgan = require('morgan');
 
 function isSpecified(x) {
   return x !== undefined && x !== null;
@@ -81,6 +82,7 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
   const app = express();
   app.use(cors());
   app.use(express.json());
+  //app.use(morgan('combined'));
 
   app.post('/generateDepositAddress', rateLimit({ windowMs: 60 * 1000, max: 1 }), async (req, res) => {
     const data = req.body;
@@ -212,7 +214,7 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
 
     await database.acquire(async () => {
       for (const i in burnHistory) {
-        burnHistory[i].approved = await database.hasApprovedWithdrawal(burnAddress, i);
+        burnHistory[i].status = await database.getWithdrawalStatus(burnAddress, i);
       }
     });
 
@@ -225,45 +227,23 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
     const data = req.body;
     const burnAddress = data.burnAddress;
     const burnIndex = data.burnIndex;
-    let approvalChain = data.approvalChain;
     if (!smartContract.isAddress(burnAddress)) {
       throw new Error('burnAddress missing or invalid');
     }
 
     await database.acquire(async () => {
-      if (await database.hasApprovedWithdrawal(burnAddress, burnIndex)) {
-        throw new Error('Withdrawal already approved');
+      if (await database.getWithdrawalStatus(burnAddress, burnIndex) !== null) {
+        throw new Error('Withdrawal already registered');
       }
 
       const { burnDestination, burnAmount } = await smartContract.getBurnHistory(burnAddress, burnIndex);
-
-      // Compute unspent.
-      const received = await dingo.listReceivedByAddress();
-      const registeredMintDepositAddresses = (await database.getRegisteredMintDepositAddresses()).map((x) => x.depositAddress);
-      const nonEmptyMintDepositAddresses = registeredMintDepositAddresses.filter((x) => x in received);
-      const unspent = await dingo.listUnspent(nonEmptyMintDepositAddresses, dingoSettings.changeAddress);
-
-      // Create raw transaction if not exists.
-      if (approvalChain === null || approvalChain === undefined || approvalChain === '') {
-        const transactionHex = await dingo.createRawTransaction(
-          unspent, dingoSettings.changeAddress, burnDestination, burnAmount, dingoSettings.fee,
-          { burnAddress: burnAddress, burnIndex: burnIndex });
-        approvalChain = transactionHex;
+      if (!(await dingo.verifyAddress(burnDestination))) {
+        throw new Error('Withdrawal address is not a valid Dingo address');
       }
 
-      // Verify.
-      if (!dingo.verifyRawTransaction(
-        unspent, dingoSettings.changeAddress, burnDestination, burnAmount, dingoSettings.fee,
-        { burnAddress: burnAddress, burnIndex: burnIndex }, approvalChain)) {
-        throw new Error('Consensus failure on withdrawal details');
-      }
-
-      // Register and approve.
-      await database.registerApprovedWithdrawal(burnAddress, burnIndex);
-      const signedTransactionHex = (await dingo.signRawTransaction(approvalChain)).hex;
-
+      await database.registerWithdrawal(burnAddress, burnIndex);
       res.send(createSignedMessage({
-        approvalChain: signedTransactionHex
+
       }));
     });
   });
@@ -271,20 +251,13 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
   app.post('/executeWithdrawal', async (req, res) => {
     const data = req.body;
     const approvalChain = data.approvalChain;
-
-    await dingo.sendRawTranscation(approvalChain);
-
-    res.send(createSignedMessage({
-
-    }));
   });
 
   const computeStats = async () => {
 
     // Read from database.
     const registeredMintDepositAddresses = (await database.getRegisteredMintDepositAddresses()).map((x) => x.depositAddress);
-    const registeredApprovedWithdrawals = await database.getRegisteredApprovedWithdrawals();
-    const registeredPayoutRequests = await database.getRegisteredPayoutRequests('approved');
+    const registeredWithdrawals = await database.getRegisteredWithdrawals();
 
     // Fetch deposited by addresses.
     const deposited = await dingo.getReceivedAmountByAddresses(registeredMintDepositAddresses);
@@ -295,8 +268,8 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
 
     // Fetch burned by addresses and indexes.
     const { burnDestinations, burnAmounts } = await smartContract.getBurnHistoryMultiple(
-      registeredApprovedWithdrawals.map((x) => x.burnAddress),
-      registeredApprovedWithdrawals.map((x) => x.burnIndex)
+      registeredWithdrawals.map((x) => x.burnAddress),
+      registeredWithdrawals.map((x) => x.burnIndex)
     );
     // Compute withdraw statistics.
     const totalWithdrawnAmount = burnAmounts.reduce((a, b) => a + BigInt(b), 0n);
@@ -336,16 +309,20 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
     const unspent = await dingo.listUnspent(nonEmptyMintDepositAddresses, dingoSettings.changeAddress);
 
     // Create raw transaction.
-    const raw = await dingo.createPayoutRawTransaction(
+    const hex = await dingo.createPayoutRawTransaction(
         unspent, dingoSettings.changeAddress, dingoSettings.payoutAddresses,
         '10000000000', dingoSettings.fee);
-    console.log(await dingo.decodeRawTranscation(raw));
+
+    await dingo.verifyPayoutRawTransaction(
+        unspent, dingoSettings.changeAddress, dingoSettings.payoutAddresses,
+        '10000000000', dingoSettings.fee,
+        raw);
   });
 
   app.post('/approvePayout',
     ipfilter(publicSettings.authorityNodes.map((x) => x.location).concat(['127.0.0.1'])),
     async (req, res) => {
-      const data = req.body;
+      const data = validateSignedMessageOne(req.body);
       const amount = data.amount;
       const stats = await computeStats();
 
