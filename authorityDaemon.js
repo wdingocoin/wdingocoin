@@ -282,15 +282,15 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
   const computeStats = async () => {
 
     // Read from database.
-    const registeredMintDepositAddresses = await database.getRegisteredMintDepositAddresses();
+    const registeredMintDepositAddresses = (await database.getRegisteredMintDepositAddresses()).map((x) => x.depositAddress);
     const registeredApprovedWithdrawals = await database.getRegisteredApprovedWithdrawals();
     const registeredPayoutRequests = await database.getRegisteredPayoutRequests('approved');
 
     // Fetch deposited by addresses.
-    const deposited = await dingo.getReceivedAmountByAddresses(registeredMintDepositAddresses.map((x) => x.depositAddress));
+    const deposited = await dingo.getReceivedAmountByAddresses(registeredMintDepositAddresses);
     // Compute deposit statistics.
-    const totalDepositedAmount = registeredMintDepositAddresses.reduce((a, b) => a + BigInt(deposited[b.depositAddress]), 0n);
-    const totalDepositedTaxAmount = registeredMintDepositAddresses.reduce((a, b) => a + BigInt(deposited[b.depositAddress]) / 100n, 0n);
+    const totalDepositedAmount = registeredMintDepositAddresses.reduce((a, b) => a + BigInt(deposited[b]), 0n);
+    const totalDepositedTaxAmount = registeredMintDepositAddresses.reduce((a, b) => a + BigInt(deposited[b]) / 100n, 0n);
     const totalDepositedMintableAmount = totalDepositedAmount - totalDepositedTaxAmount;
 
     // Fetch burned by addresses and indexes.
@@ -303,13 +303,16 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
     const totalWithdrawnTaxAmount = burnAmounts.reduce((a, b) => a + BigInt(b) / 100n, 0n);
     const totalWithdrawnFinalAmount = totalWithdrawnAmount - totalWithdrawnTaxAmount;
 
+    // Compute expected unspent.
+    const totalExpectedUnspent = totalDepositedAmount - totalWithdrawnFinalAmount;
+
     // Compute unspent.
     const received = await dingo.listReceivedByAddress();
     const nonEmptyMintDepositAddresses = registeredMintDepositAddresses.filter((x) => x in received);
     const unspent = await dingo.listUnspent(nonEmptyMintDepositAddresses, dingoSettings.changeAddress);
     const totalUnspent = unspent.reduce((a, b) => a + BigInt(dingo.toSatoshi(b.amount.toString())), BigInt(0));
 
-    const totalExpectedUnspent = totalDepositedAmount - totalWithdrawnFinalAmount;
+    const totalTaxCollected = totalDepositedTaxAmount + totalWithdrawnTaxAmount;
 
     return {
       totalDepositedAmount: totalDepositedAmount,
@@ -319,7 +322,8 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
       totalWithdrawnTaxAmount: totalWithdrawnTaxAmount,
       totalWithdrawnFinalAmount: totalWithdrawnFinalAmount,
       totalUnspent: totalUnspent,
-      totalExpectedUnspent: totalExpectedUnspent
+      totalExpectedUnspent: totalExpectedUnspent,
+      totalTaxCollected: totalTaxCollected
     }
 
   };
@@ -354,15 +358,18 @@ function validateSignedMessageOne(message, walletAddresses, discard=true) {
 
     console.log('==================================');
     console.log('Total deposited (coins): ' + dingo.fromSatoshi(s.totalDepositedAmount.toString()));
-    console.log('Total tax from deposits (coins): ' + dingo.fromSatoshi(s.totalDepositedTaxAmount.toString()));
+    console.log('Total tax collected from deposits (coins): ' + dingo.fromSatoshi(s.totalDepositedTaxAmount.toString()));
     console.log('Total mintable (tokens): ' + dingo.fromSatoshi(s.totalDepositedMintableAmount.toString()));
     console.log('-----');
+    console.log('(Mint and burn records are stored directly on the smart contract.)');
+    console.log('-----');
     console.log('Total withdrawn (tokens): ' + dingo.fromSatoshi(s.totalWithdrawnAmount.toString()));
-    console.log('Total tax from withdrawals (coins): ' + dingo.fromSatoshi(s.totalWithdrawnTaxAmount.toString()));
+    console.log('Total tax collected from withdrawals (coins): ' + dingo.fromSatoshi(s.totalWithdrawnTaxAmount.toString()));
     console.log('Total withdrawn post-tax (coins): ' + dingo.fromSatoshi(s.totalWithdrawnFinalAmount.toString()));
     console.log('-----');
     console.log('Total unspent (coins): ' + dingo.fromSatoshi(s.totalUnspent.toString()));
     console.log('Total expected unspent (coins): ' + dingo.fromSatoshi(s.totalExpectedUnspent.toString()));
+    console.log('Total tax collected (coins): ' + dingo.fromSatoshi(s.totalTaxCollected.toString()));
     console.log('==================================');
   });
 
