@@ -1,0 +1,23 @@
+{
+  "port": 8080,
+  "authorityThreshold": 3,
+  "authorityNodes": [
+    {
+      "location": "127.0.0.1",
+      "port": 8080,
+      "walletAddress": ""
+    },
+    {
+      "location": "127.0.0.1",
+      "port": 8081,
+      "walletAddress": ""
+    },
+    {
+      "location": "127.0.0.1",
+      "port": 8082,
+      "walletAddress": ""
+    }
+  ],
+  "changeAddress": "",
+  "fee": 10
+}

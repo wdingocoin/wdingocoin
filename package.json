@@ -1,0 +1,23 @@
+{
+  "name": "wdingo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "authorityDaemon.js",
+  "dependencies": {
+    "async-lock": "^1.3.0",
+    "axios": "^0.21.1",
+    "cors": "^2.8.5",
+    "express": "^4.17.1",
+    "express-async-errors": "^3.1.1",
+    "express-ipfilter": "^1.2.0",
+    "express-rate-limit": "^5.3.0",
+    "sqlite3": "^5.0.2",
+    "web3": "^1.3.6"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
