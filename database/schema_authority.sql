@@ -9,7 +9,8 @@ DROP TABLE IF EXISTS mintDepositAddresses;
 CREATE TABLE IF NOT EXISTS mintDepositAddresses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   mintAddress TEXT NOT NULL UNIQUE,
-  depositAddress TEXT NOT NULL UNIQUE
+  depositAddress TEXT NOT NULL UNIQUE,
+  approvedTax TEXT NOT NULL DEFAULT "0"
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mintDepositAddresses_mintAddress ON mintDepositAddresses (mintAddress);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mintDepositAddresses_depositAddress ON mintDepositAddresses (depositAddress);
@@ -19,24 +20,17 @@ CREATE TABLE IF NOT EXISTS withdrawals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   burnAddress TEXT NOT NULL,
   burnIndex INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT "SUBMITTED"
+  approvedAmount TEXT NOT NULL DEFAULT "0",
+  approvedTax TEXT NOT NULL DEFAULT "0"
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_withdrawals_burnAddress_burnIndex ON withdrawals (burnAddress, burnIndex);
 
-DROP TABLE IF EXISTS approvedTaxPayouts;
-CREATE TABLE IF NOT EXISTS approvedTaxPayouts (
+DROP TABLE IF EXISTS approvedPayouts;
+CREATE TABLE IF NOT EXISTS approvedPayouts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   address TEXT NOT NULL,
   amount TEXT NOT NULL,
-  at TEXT NOT NULL
+  at TEXT NOT NULL,
+  info TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_approvedTaxPayouts_address ON approvedTaxPayouts (address);
-
-DROP TABLE IF EXISTS payoutRequests;
-CREATE TABLE IF NOT EXISTS payoutRequests (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  requester TEXT NOT NULL,
-  requestedAt TEXT NOT NULL,
-  data TEXT NOT NULL,
-  result TEXT NOT NULL
-);
+CREATE INDEX IF NOT EXISTS idx_approvedPayouts_address ON approvedPayouts (address);

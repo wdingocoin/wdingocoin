@@ -14,8 +14,8 @@ module.exports = {
   getMintDepositAddress,
   getRegisteredMintDepositAddresses,
   registerWithdrawal,
-  getWithdrawalStatus,
-  getRegisteredWithdrawals,
+  getWithdrawal,
+  getRegisteredUnapprovedWithdrawals,
   registerApprovedTaxPayout,
   getRegisteredApprovedTaxPayouts,
   registerPayoutRequest,
@@ -67,9 +67,10 @@ async function getMintDepositAddress(mintAddress) {
   return results[0].depositAddress;
 }
 
-function getRegisteredMintDepositAddresses() {
+function getRegisteredMintDepositAddresses(filterDepositAddresses) {
   return util.promisify(db.all.bind(db))(
-    `SELECT mintAddress, depositAddress FROM mintDepositAddresses`
+    `SELECT mintAddress, depositAddress, approvedTax FROM mintDepositAddresses WHERE depositAddress IN (${filterDepositAddresses.map(x => '?')})`,
+    filterDepositAddresses
   );
 }
 
@@ -80,9 +81,9 @@ function registerWithdrawal(burnAddress, burnIndex) {
   );
 }
 
-async function getWithdrawalStatus(burnAddress, burnIndex) {
+async function getWithdrawal(burnAddress, burnIndex) {
   const result = await util.promisify(db.all.bind(db))(
-    `SELECT status from withdrawals WHERE burnAddress=? AND burnIndex=?`,
+    `SELECT burnAddress, burnIndex, approvedAmount, approvedTax from withdrawals WHERE burnAddress=? AND burnIndex=?`,
     [burnAddress, burnIndex]
   );
   if (result.length === 0) {
@@ -91,20 +92,13 @@ async function getWithdrawalStatus(burnAddress, burnIndex) {
   if (result.length !== 1) {
     throw new Error('Withdrawal duplicated on (burnAddress, burnIndex)');
   }
-  return result[0].status;
+  return result[0];
 }
 
-function getRegisteredWithdrawals(filterStatus) {
-  if (filterStatus === undefined) {
-    return util.promisify(db.all.bind(db))(
-      `SELECT burnAddress, burnIndex, status FROM withdrawals`
-    );
-  } else {
-    return util.promisify(db.all.bind(db))(
-      `SELECT burnAddress, burnIndex, status FROM withdrawals WHERE status=?`,
-      [filterStatus]
-    );
-  }
+function getRegisteredUnapprovedWithdrawals() {
+  return util.promisify(db.all.bind(db))(
+    `SELECT burnAddress, burnIndex, approvedAmount, approvedTax FROM withdrawals WHERE approvedTax="0"`
+  );
 }
 
 function registerApprovedTaxPayout(address, amount, at) {

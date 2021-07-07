@@ -108,9 +108,9 @@ async function listReceivedByAddress(confirmations) {
 async function getReceivedAmountByAddress(confirmations, address) {
   const received = await listReceivedByAddress(confirmations);
   if (!(address in received)) {
-    return toSatoshi('0');
+    return 0;
   }
-  return toSatoshi(received[address].amount.toString());
+  return received[address].amount;
 }
 
 async function getReceivedAmountByAddresses(confirmations, addresses) {
@@ -118,9 +118,9 @@ async function getReceivedAmountByAddresses(confirmations, addresses) {
   const result = {};
   for (const address of addresses) {
     if (!(address in received)) {
-      result[address] = toSatoshi('0');
+      result[address] = 0;
     } else {
-      result[address] = toSatoshi(received[address].amount.toString());
+      result[address] = received[address].amount;
     }
   }
   return result;
@@ -137,7 +137,7 @@ function decodeRawTranscation(hex) {
 function createRawTransaction(unspent, payouts, data) {
   const dict = {};
   for (const address of Object.keys(payouts)) {
-    dict[address] = fromSatoshi(payouts[address].toString());
+    dict[address] = payouts[address];
   }
 
   const hash = crypto.createHash('sha256');
@@ -184,7 +184,7 @@ async function verifyAndSignRawTransaction(unspent, payouts, data, hex) {
 
   // TODO: Stop being lazy and write the O(N) solution.
   for (const address of Object.keys(payouts)) {
-    if (toSatoshi(getAddressVout(tx.vout, address).value.toString()) !== payouts[address]) {
+    if (getAddressVout(tx.vout, address).value.toString() !== payouts[address]) {
       throw new Error('Payouts amount mismatch');
     }
   }
