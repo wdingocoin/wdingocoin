@@ -8,14 +8,19 @@ let dbLock = null;
 module.exports = {
   load,
   acquire,
+
   hasUsedDepositAddresses,
   registerUsedDepositAddresses,
+
   registerMintDepositAddress,
   getMintDepositAddress,
-  getRegisteredMintDepositAddresses,
+  getMintDepositAddresses,
+  updateMintDepositAddresses,
+
   registerWithdrawal,
   getWithdrawal,
-  getRegisteredUnapprovedWithdrawals
+  getUnapprovedWithdrawals,
+  updateWithdrawals
 };
 
 function load(path) {
@@ -63,11 +68,20 @@ async function getMintDepositAddress(mintAddress) {
   return results[0].depositAddress;
 }
 
-function getRegisteredMintDepositAddresses(filterDepositAddresses) {
+function getMintDepositAddresses(filterDepositAddresses) {
   return util.promisify(db.all.bind(db))(
     `SELECT mintAddress, depositAddress, approvedTax FROM mintDepositAddresses WHERE depositAddress IN (${filterDepositAddresses.map(x => '?')})`,
     filterDepositAddresses
   );
+}
+
+// TODO: Maybe warn that only the approvedTax field will be updated.
+async function updateMintDepositAddresses(mintDepositAddresses) {
+  const stmt = db.prepare(`UPDATE mintDepositAddresses SET approvedTax=? WHERE depositAddress=?`);
+  for (const a of mintDepositAddresses) {
+    await stmt.run(a.approvedTax, a.depositAddress);
+  }
+  stmt.finalize();
 }
 
 function registerWithdrawal(burnAddress, burnIndex) {
@@ -91,8 +105,16 @@ async function getWithdrawal(burnAddress, burnIndex) {
   return result[0];
 }
 
-function getRegisteredUnapprovedWithdrawals() {
+function getUnapprovedWithdrawals() {
   return util.promisify(db.all.bind(db))(
     `SELECT burnAddress, burnIndex, approvedAmount, approvedTax FROM withdrawals WHERE approvedTax="0"`
   );
+}
+
+async function updateWithdrawals(withdrawals) {
+  const stmt = db.prepare(`UPDATE withdrawals SET approvedAmount=?, approvedTax=? WHERE burnAddress=? AND burnIndex=?`);
+  for (const w of withdrawals) {
+    await stmt.run(w.approvedAmount, w.approvedTax, w.burnAddress, w.burnIndex);
+  }
+  stmt.finalize();
 }

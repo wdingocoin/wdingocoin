@@ -269,21 +269,21 @@ function getAuthorityLink(x) {
 
     // Compute tax from deposits.
     const deposited = await dingo.listReceivedByAddress(dingoSettings.confirmations);
-    const nonEmptyMintDepositAddresses = (await database.getRegisteredMintDepositAddresses(Object.keys(deposited)));
+    const nonEmptyMintDepositAddresses = (await database.getMintDepositAddresses(Object.keys(deposited)));
     for (const a of nonEmptyMintDepositAddresses) {
       const approvedTax = BigInt(dingo.toSatoshi(a.approvedTax));
       const depositedAmount = BigInt(dingo.toSatoshi(deposited[a.depositAddress].amount.toString()));
       const approvableTax = depositedAmount < fee ? 0 : fee + (depositedAmount - fee) / 100n;
       if (approvableTax > approvedTax) {
         const amount = approvableTax - approvedTax;
-        depositTaxPayouts.push({ depositAddress: a.depositAddress, amount: amount });
+        depositTaxPayouts.push({ depositAddress: a.depositAddress, amount: amount.toString() });
       } else if (approvableTax < approvedTax) {
         throw new Error('Deposit approved tax exceeds approvable');
       }
     }
 
     // Query unapproved withdrawals.
-    const unapprovedWithdrawals = await database.getRegisteredUnapprovedWithdrawals();
+    const unapprovedWithdrawals = await database.getUnapprovedWithdrawals();
     const burnAddresses = unapprovedWithdrawals.map((x) => x.burnAddress);
     const burnIndexes = unapprovedWithdrawals.map((x) => x.burnIndex);
     const { burnDestinations, burnAmounts } = await smartContract.getBurnHistoryMultiple(burnAddresses, burnIndexes);
@@ -295,12 +295,12 @@ function getAuthorityLink(x) {
         burnAddress: burnAddresses[i],
         burnIndex: burnIndexes[i],
         burnDestination: burnDestinations[i],
-        amount: paid });
+        amount: paid.toString() });
       withdrawalTaxPayouts.push({
         burnAddress: burnAddresses[i],
         burnIndex: burnIndexes[i],
         burnDestination: burnDestinations[i],
-        amount: tax });
+        amount: tax.toString() });
     }
 
     return {
@@ -313,7 +313,7 @@ function getAuthorityLink(x) {
   const validatePayouts = async (depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts) => {
 
     const fee = BigInt(dingo.toSatoshi(dingoSettings.fee));
-    const totalTax = depositTaxPayouts.reduce((a, b) => a + b.amount, 0n) + withdrawalTaxPayouts.reduce((a, b) => a + b.amount, 0n);
+    const totalTax = depositTaxPayouts.reduce((a, b) => a + BigInt(b.amount), 0n) + withdrawalTaxPayouts.reduce((a, b) => a + BigInt(b.amount), 0n);
     if (totalTax < fee) {
       throw new Error('Insufficient tax to cover fees');
     }
@@ -321,7 +321,7 @@ function getAuthorityLink(x) {
     // Check if requested tax from deposits does not exceed taxable.
     const deposited = await dingo.listReceivedByAddress(dingoSettings.confirmations);
     const depositAddresses = {};
-    (await database.getRegisteredMintDepositAddresses(Object.keys(deposited))).forEach((x) => depositAddresses[x.depositAddress] = x);
+    (await database.getMintDepositAddresses(Object.keys(deposited))).forEach((x) => depositAddresses[x.depositAddress] = x);
 
     for (const p of depositTaxPayouts) {
       if (!(p.depositAddress in deposited)) {
@@ -333,7 +333,7 @@ function getAuthorityLink(x) {
       const approvedTax = BigInt(dingo.toSatoshi(depositAddresses[p.depositAddress].approvedTax));
       const depositedAmount = BigInt(dingo.toSatoshi(deposited[p.depositAddress].amount.toString()));
       const approvableTax = depositedAmount < fee ? 0 : fee + (depositedAmount - fee) / 100n;
-      if (p.amount > approvableTax) {
+      if (BigInt(p.amount) > approvableTax) {
         throw new Error('Requested tax amount more than approvable tax');
       }
     }
@@ -365,10 +365,10 @@ function getAuthorityLink(x) {
       }
       const paid = BigInt(burnAmount) - fee - (BigInt(burnAmount) - fee) / 100n;
       const tax = BigInt(burnAmount) - paid;
-      if (withdrawalPayouts[i].amount !== paid) {
+      if (BigInt(withdrawalPayouts[i].amount) !== paid) {
         throw new Error('Withdrawal amount incorrect');
       }
-      if (withdrawalTaxPayouts[i].amount !== tax) {
+      if (BigInt(withdrawalTaxPayouts[i].amount) !== tax) {
         throw new Error('Withdrawal tax amount incorrect');
       }
     }
@@ -381,15 +381,15 @@ function getAuthorityLink(x) {
     const vouts = {};
     for (const p of withdrawalPayouts) {
       if (p.burnDestination in vouts) {
-        vouts[p.burnDestination] += p.amount;
+        vouts[p.burnDestination] += BigInt(p.amount);
       } else {
-        vouts[p.burnDestination] = p.amount;
+        vouts[p.burnDestination] = BigInt(p.amount);
       }
     }
 
     // Compute tax payouts.
     const fee = BigInt(dingo.toSatoshi(dingoSettings.fee));
-    const totalTax = depositTaxPayouts.reduce((a, b) => a + b.amount, 0n) + withdrawalTaxPayouts.reduce((a, b) => a + b.amount, 0n);
+    const totalTax = depositTaxPayouts.reduce((a, b) => a + BigInt(b.amount), 0n) + withdrawalTaxPayouts.reduce((a, b) => a + BigInt(b.amount), 0n);
     const taxPayoutPerPayee = (totalTax - fee) / BigInt(dingoSettings.taxPayoutAddresses.length);
     for (const a of dingoSettings.taxPayoutAddresses) {
       if (a in vouts) {
@@ -404,7 +404,7 @@ function getAuthorityLink(x) {
 
     // Compute change.
     const deposited = await dingo.listReceivedByAddress(dingoSettings.confirmations);
-    const nonEmptyMintDepositAddresses = (await database.getRegisteredMintDepositAddresses(Object.keys(deposited)));
+    const nonEmptyMintDepositAddresses = (await database.getMintDepositAddresses(Object.keys(deposited)));
     const unspent = await dingo.listUnspent(dingoSettings.confirmations, nonEmptyMintDepositAddresses.map((x) => x.depositAddress), dingoSettings.changeAddress);
     const totalUnspent = unspent.reduce((a, b) => a + BigInt(dingo.toSatoshi(b.amount.toString())), BigInt(0));
     const change = totalUnspent - totalPayout - fee; // Rounding errors from taxPayout / N is absorbed into change here.
@@ -425,22 +425,66 @@ function getAuthorityLink(x) {
     return { unspent: unspent, vouts: vouts };
   };
 
-  const applyPayouts = async () => {
+  const applyPayouts = async (depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts) => {
+    const depositAddresses = {};
+    (await database.getMintDepositAddresses(depositTaxPayouts.map((x) => x.depositAddress))).forEach((x) => depositAddresses[x.depositAddress] = x);
+    for (const p of depositTaxPayouts) {
+      const previousTax = BigInt(depositAddresses[p.depositAddress].approvedTax);
+      const tax = BigInt(p.amount);
+      depositAddresses[p.depositAddress].approvedTax = (previousTax + tax).toString();
+    }
+    await database.updateMintDepositAddresses(Object.values(depositAddresses));
 
+    const withdrawals = [];
+    for (const i in withdrawalPayouts) {
+      const withdrawal = await database.getWithdrawal(withdrawalPayouts[i].burnAddress, withdrawalPayouts[i].burnIndex);
+      const previousApprovedAmount = BigInt(withdrawal.approvedAmount);
+      const previousApprovedTax = BigInt(withdrawal.approvedTax);
+      const amount = BigInt(withdrawalPayouts[i].amount);
+      const tax = BigInt(withdrawalTaxPayouts[i].amount);
+      withdrawal.approvedAmount = (previousApprovedAmount + amount).toString();
+      withdrawal.approvedTax = (previousApprovedTax + tax).toString();
+      withdrawals.push(withdrawal);
+    }
+    await database.updateWithdrawals(withdrawals);
   };
 
 
   app.post('/requestPayouts', ipfilter(['127.0.0.1']), async (req, res) => {
     const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts } = await computePendingPayouts();
-    await validatePayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
     const { unspent, vouts } = await computeUnspentAndVouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
-    let approvalChain = await dingo.createRawTransaction(unspent, vouts, {});
-    approvalChain = await dingo.verifyAndSignRawTransaction(unspent, vouts, {}, approvalChain);
+    // Validate payouts.
+    await validatePayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
+
+    // Compute approval chain and sign.
+    let approvalChain = await dingo.createRawTransaction(
+      unspent, vouts,
+      {
+        depositTaxPayouts: depositTaxPayouts,
+        withdrawalPayouts: withdrawalPayouts,
+        withdrawalTaxPayouts: withdrawalTaxPayouts
+      });
+    approvalChain = await dingo.verifyAndSignRawTransaction(
+      unspent, vouts,
+      {
+        depositTaxPayouts: depositTaxPayouts,
+        withdrawalPayouts: withdrawalPayouts,
+        withdrawalTaxPayouts: withdrawalTaxPayouts
+      }, approvalChain);
+
+    // Apply payouts.
+    await applyPayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
+
     for (const node of publicSettings.authorityNodes) {
       if (node.walletAddress !== smartContract.getAccountAddress()) {
         approvalChain = validateSignedMessage(
-          (await axios.post(`${getAuthorityLink(node)}/approvePayouts`, createSignedMessage({ approvalChain: approvalChain }))).data,
+          (await axios.post(`${getAuthorityLink(node)}/approvePayouts`, createSignedMessage({
+            depositTaxPayouts,
+            withdrawalPayouts,
+            withdrawalTaxPayouts,
+            approvalChain: approvalChain
+          }))).data,
           node.walletAddress
         ).approvalChain;
       }
@@ -448,10 +492,28 @@ function getAuthorityLink(x) {
   });
 
   app.post('/approvePayouts', ipfilter([publicSettings.authorityNodes[publicSettings.payoutCoordinator].location]), async (req, res) => {
-    const data = validateSignedMessage(req.body, publicSettings.authorityNodes[publicSettings.payoutCoordinator].walletAddress);
-    const { unspent, payoutsByAddress } = await computeLatestPayouts();
-    const approvalChain = await dingo.verifyAndSignRawTransaction(unspent, payoutsByAddress, {}, data.approvalChain);
-    res.send(createSignedMessage({ approvalChain: approvalChain }));
+    // Extract info.
+    const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts, approvalChain } =
+      validateSignedMessage(req.body, publicSettings.authorityNodes[publicSettings.payoutCoordinator].walletAddress);
+
+    // Validate payouts.
+    await validatePayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
+
+    // Compute unspent and vouts.
+    const { unspent, vouts } = await computeUnspentAndVouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
+
+    // Validate vouts and sign.
+    const approvalChainNext = await dingo.verifyAndSignRawTransaction(
+      unspent, vouts,
+      {
+        depositTaxPayouts: depositTaxPayouts,
+        withdrawalPayouts: withdrawalPayouts,
+        withdrawalTaxPayouts: withdrawalTaxPayouts
+      }, approvalChain);
+
+    await applyPayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
+
+    res.send(createSignedMessage({ approvalChain: approvalChainNext }));
   });
 
   app.post('/stats', rateLimit({ windowMs: 1000, max: 1 }), async (req, res) => {
