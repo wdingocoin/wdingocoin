@@ -15,11 +15,7 @@ module.exports = {
   getRegisteredMintDepositAddresses,
   registerWithdrawal,
   getWithdrawal,
-  getRegisteredUnapprovedWithdrawals,
-  registerApprovedTaxPayout,
-  getRegisteredApprovedTaxPayouts,
-  registerPayoutRequest,
-  getRegisteredPayoutRequests
+  getRegisteredUnapprovedWithdrawals
 };
 
 function load(path) {
@@ -99,37 +95,4 @@ function getRegisteredUnapprovedWithdrawals() {
   return util.promisify(db.all.bind(db))(
     `SELECT burnAddress, burnIndex, approvedAmount, approvedTax FROM withdrawals WHERE approvedTax="0"`
   );
-}
-
-function registerApprovedTaxPayout(address, amount, at) {
-  return util.promisify(db.run.bind(db))(
-    'INSERT INTO approvedTaxPayouts (address, amount, at) VALUES (?, ?, ?)',
-    [address, amount, at]
-  );
-}
-
-function getRegisteredApprovedTaxPayouts() {
-  return util.promisify(db.all.bind(db))(
-    'SELECT (address, amount, at) FROM approvedTaxPayouts'
-  );
-}
-
-function registerPayoutRequest(requester, requestedAt, data, result) {
-  return util.promisify(db.run.bind(db))(
-    'INSERT INTO payoutRequests (requester, requestedAt, data, result) VALUES (?, ?, ?, ?)',
-    [requester, requestedAt, data, result]
-  );
-}
-
-function getRegisteredPayoutRequests(filterResult) {
-  if (filterResult === null || filterResult === undefined || filterResult === '') {
-    return util.promisify(db.all.bind(db))(
-      `SELECT requester, requestedAt, data, result FROM payoutRequests`
-    );
-  } else {
-    return util.promisify(db.all.bind(db))(
-      `SELECT requester, requestedAt, data, result FROM payoutRequests WHERE result=?`,
-      [filterResult]
-    );
-  }
 }
