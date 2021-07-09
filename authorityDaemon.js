@@ -10,6 +10,8 @@ const rateLimit = require("express-rate-limit");
 const ipfilter = require('express-ipfilter').IpFilter
 const morgan = require('morgan');
 
+const LOCALHOST = '127.0.0.1';
+
 function isSpecified(x) {
   return x !== undefined && x !== null;
 }
@@ -88,6 +90,10 @@ function getAuthorityLink(x) {
   app.use(express.json());
   //app.use(morgan('combined'));
 
+  app.post('/ping', rateLimit({ windowMs: 10 * 1000, max: 10}), async (req, res) => {
+    res.send(createSignedMessage({ timestamp: Date.now() }));
+  });
+
   app.post('/generateDepositAddress', rateLimit({ windowMs: 60 * 1000, max: 1 }), async (req, res) => {
     const data = req.body;
     const mintAddress = data.mintAddress;
@@ -101,7 +107,7 @@ function getAuthorityLink(x) {
     }));
   });
 
-  app.post('/registerMintDepositAddress', async (req, res) => {
+  app.post('/registerMintDepositAddress', rateLimit({ windowMs: 60 * 1000, max: 1 }), async (req, res) => {
     const data = req.body;
     if (data.generateDepositAddressResponses.length !== publicSettings.authorityNodes.length) {
       throw new Error('Incorrect authority count');
@@ -256,6 +262,50 @@ function getAuthorityLink(x) {
     });
   });
 
+  app.post('/stats',
+    rateLimit({ windowMs: 5 * 1000, max: 1 }),
+    ipfilter(publicSettings.authorityNodes.map((x) => x.location).concat([LOCALHOST])),
+    async (req, res) => {
+      const fee = BigInt(dingo.toSatoshi(dingoSettings.fee));
+      const stats = { depositAddresses: {}, withdrawals: {} };
+
+      const depositAddresses = await database.getMintDepositAddresses();
+      stats.depositAddresses.count = depositAddresses.length;
+      stats.depositAddresses.totalApprovedTax = depositAddresses.reduce((a, b) => a + BigInt(b.approvedTax), 0n).toString();
+
+      const withdrawals = await database.getWithdrawals();
+      stats.withdrawals.count = withdrawals.length;
+      stats.withdrawals.totalApprovedAmount = withdrawals.reduce((a, b) => a + BigInt(b.approvedAmount), 0n).toString();
+      stats.withdrawals.totalApprovedTax = withdrawals.reduce((a, b) => a + BigInt(b.approvedTax), 0n).toString();
+
+      res.send(createSignedMessage(stats));
+    }
+  );
+
+  app.post('/allNodeStats', ipfilter([LOCALHOST]), async (req, res) => {
+    const stats = await Promise.all(publicSettings.authorityNodes.map(
+      async (x) => validateSignedMessage((await axios.post(`${getAuthorityLink(x)}/stats`)).data, x.walletAddress)));
+
+    for (const i in publicSettings.authorityNodes) {
+      console.log(`============= AUTHORITY ${i} ===============`);
+      console.log('[NODE INFO]');
+      console.log(`  Node IP: ${publicSettings.authorityNodes[i].location}`);
+      console.log(`  Wallet: ${publicSettings.authorityNodes[i].walletAddress}`);
+      console.log('[DEPOSITS]');
+      console.log(`  Count: ${stats[i].depositAddresses.count}`);
+      console.log(`  Total approved tax: ${dingo.fromSatoshi(stats[i].depositAddresses.totalApprovedTax)}`);
+      console.log('[WITHDRAWALS]');
+      console.log(`  Count: ${stats[i].withdrawals.count}`);
+      console.log(`  Total approved amount: ${dingo.fromSatoshi(stats[i].withdrawals.totalApprovedAmount)}`);
+      console.log(`  Total approved tax: ${dingo.fromSatoshi(stats[i].withdrawals.totalApprovedTax)}`);
+      if (i == publicSettings.authorityNodes.length - 1) {
+        console.log('============================================');
+      }
+    }
+  });
+
+
+
   // Compute pending payouts:
   // 1) Tax payouts from deposits (10 + 1%).
   // 2) Withdrawal payouts.
@@ -271,7 +321,7 @@ function getAuthorityLink(x) {
     const deposited = await dingo.listReceivedByAddress(dingoSettings.confirmations);
     const nonEmptyMintDepositAddresses = (await database.getMintDepositAddresses(Object.keys(deposited)));
     for (const a of nonEmptyMintDepositAddresses) {
-      const approvedTax = BigInt(dingo.toSatoshi(a.approvedTax));
+      const approvedTax = BigInt(a.approvedTax);
       const depositedAmount = BigInt(dingo.toSatoshi(deposited[a.depositAddress].amount.toString()));
       const approvableTax = depositedAmount < fee ? 0 : fee + (depositedAmount - fee) / 100n;
       if (approvableTax > approvedTax) {
@@ -330,8 +380,8 @@ function getAuthorityLink(x) {
       if (!(p.depositAddress in depositAddresses)) {
         throw new Error('Dingo address not registered');
       }
-      const approvedTax = BigInt(dingo.toSatoshi(depositAddresses[p.depositAddress].approvedTax));
-      const depositedAmount = BigInt(dingo.toSatoshi(deposited[p.depositAddress].amount.toString()));
+      const approvedTax = BigInt(depositAddresses[p.depositAddress].approvedTax);
+      const depositedAmount = BigInt(toSatoshi(deposited[p.depositAddress].amount.toString()));
       const approvableTax = depositedAmount < fee ? 0 : fee + (depositedAmount - fee) / 100n;
       if (BigInt(p.amount) > approvableTax) {
         throw new Error('Requested tax amount more than approvable tax');
@@ -450,7 +500,7 @@ function getAuthorityLink(x) {
   };
 
 
-  app.post('/requestPayouts', ipfilter(['127.0.0.1']), async (req, res) => {
+  app.post('/requestPayouts', ipfilter([LOCALHOST]), async (req, res) => {
     const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts } = await computePendingPayouts();
     const { unspent, vouts } = await computeUnspentAndVouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
@@ -514,26 +564,6 @@ function getAuthorityLink(x) {
     await applyPayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
     res.send(createSignedMessage({ approvalChain: approvalChainNext }));
-  });
-
-  app.post('/stats', rateLimit({ windowMs: 1000, max: 1 }), async (req, res) => {
-    const s = await computeStats();
-
-    console.log('==================================');
-    console.log('Total deposited (coins): ' + dingo.fromSatoshi(s.totalDepositedAmount.toString()));
-    console.log('Total tax collected from deposits (coins): ' + dingo.fromSatoshi(s.totalDepositedTaxAmount.toString()));
-    console.log('Total mintable (tokens): ' + dingo.fromSatoshi(s.totalDepositedMintableAmount.toString()));
-    console.log('-----');
-    console.log('(Mint and burn records are stored directly on the smart contract.)');
-    console.log('-----');
-    console.log('Total withdrawn (tokens): ' + dingo.fromSatoshi(s.totalWithdrawnAmount.toString()));
-    console.log('Total tax collected from withdrawals (coins): ' + dingo.fromSatoshi(s.totalWithdrawnTaxAmount.toString()));
-    console.log('Total withdrawn post-tax (coins): ' + dingo.fromSatoshi(s.totalWithdrawnFinalAmount.toString()));
-    console.log('-----');
-    console.log('Total unspent (coins): ' + dingo.fromSatoshi(s.totalUnspent.toString()));
-    console.log('Total expected unspent (coins): ' + dingo.fromSatoshi(s.totalExpectedUnspent.toString()));
-    console.log('Total tax collected (coins): ' + dingo.fromSatoshi(s.totalTaxCollected.toString()));
-    console.log('==================================');
   });
 
   app.listen(publicSettings.port, () => {

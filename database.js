@@ -19,6 +19,7 @@ module.exports = {
 
   registerWithdrawal,
   getWithdrawal,
+  getWithdrawals,
   getUnapprovedWithdrawals,
   updateWithdrawals
 };
@@ -69,10 +70,14 @@ async function getMintDepositAddress(mintAddress) {
 }
 
 function getMintDepositAddresses(filterDepositAddresses) {
-  return util.promisify(db.all.bind(db))(
-    `SELECT mintAddress, depositAddress, approvedTax FROM mintDepositAddresses WHERE depositAddress IN (${filterDepositAddresses.map(x => '?')})`,
-    filterDepositAddresses
-  );
+  if (filterDepositAddresses !== null && filterDepositAddresses !== undefined) {
+    return util.promisify(db.all.bind(db))(
+      `SELECT mintAddress, depositAddress, approvedTax FROM mintDepositAddresses WHERE depositAddress IN (${filterDepositAddresses.map(x => '?')})`,
+      filterDepositAddresses
+    );
+  } else {
+    return util.promisify(db.all.bind(db))(`SELECT mintAddress, depositAddress, approvedTax FROM mintDepositAddresses`);
+  }
 }
 
 // TODO: Maybe warn that only the approvedTax field will be updated.
@@ -103,6 +108,12 @@ async function getWithdrawal(burnAddress, burnIndex) {
     throw new Error('Withdrawal duplicated on (burnAddress, burnIndex)');
   }
   return result[0];
+}
+
+function getWithdrawals() {
+  return util.promisify(db.all.bind(db))(
+    `SELECT burnAddress, burnIndex, approvedAmount, approvedTax FROM withdrawals`
+  );
 }
 
 function getUnapprovedWithdrawals() {

@@ -24,13 +24,3 @@ CREATE TABLE IF NOT EXISTS withdrawals (
   approvedTax TEXT NOT NULL DEFAULT "0"
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_withdrawals_burnAddress_burnIndex ON withdrawals (burnAddress, burnIndex);
-
-DROP TABLE IF EXISTS approvedPayouts;
-CREATE TABLE IF NOT EXISTS approvedPayouts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  address TEXT NOT NULL,
-  amount TEXT NOT NULL,
-  at TEXT NOT NULL,
-  info TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_approvedPayouts_address ON approvedPayouts (address);
