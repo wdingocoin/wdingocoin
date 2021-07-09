@@ -271,10 +271,14 @@ function getAuthorityLink(x) {
 
       const depositAddresses = await database.getMintDepositAddresses();
       stats.depositAddresses.count = depositAddresses.length;
+      const depositedAmounts = await dingo.getReceivedAmountByAddresses(dingoSettings.confirmations, depositAddresses.map((x) => x.depositAddress));
+      stats.depositAddresses.totalDepositedAmount = Object.values(depositedAmounts).reduce((a, b) => a + BigInt(dingo.toSatoshi(b.toString())), 0n).toString();
       stats.depositAddresses.totalApprovedTax = depositAddresses.reduce((a, b) => a + BigInt(b.approvedTax), 0n).toString();
 
       const withdrawals = await database.getWithdrawals();
       stats.withdrawals.count = withdrawals.length;
+      const { burnAmounts } = await smartContract.getBurnHistoryMultiple(withdrawals.map((x) => x.burnAddress), withdrawals.map((x) => x.burnIndex));
+      stats.withdrawals.totalBurnedAmount = burnAmounts.reduce((a, b) => a + BigInt(b.toString()), 0n).toString();
       stats.withdrawals.totalApprovedAmount = withdrawals.reduce((a, b) => a + BigInt(b.approvedAmount), 0n).toString();
       stats.withdrawals.totalApprovedTax = withdrawals.reduce((a, b) => a + BigInt(b.approvedTax), 0n).toString();
 
@@ -282,26 +286,60 @@ function getAuthorityLink(x) {
     }
   );
 
-  app.post('/allNodeStats', ipfilter([LOCALHOST]), async (req, res) => {
+  app.post('/consensus', ipfilter([LOCALHOST]), async (req, res) => {
     const stats = await Promise.all(publicSettings.authorityNodes.map(
       async (x) => validateSignedMessage((await axios.post(`${getAuthorityLink(x)}/stats`)).data, x.walletAddress)));
 
+    const consensusStats = [];
+    const consensusNodes = [];
+
+    const statsEquals = (a, b) => {
+      return a.depositAddresses.count === b.depositAddresses.count
+        && a.depositAddresses.totalDepositedAmount === b.depositAddresses.totalDepositedAmount
+        && a.depositAddresses.totalApprovedTax === b.depositAddresses.totalApprovedTax
+        && a.withdrawals.count === b.withdrawals.count
+        && a.withdrawals.totalBurnedAmount === b.withdrawals.totalBurnedAmount
+        && a.withdrawals.totalApprovedAmount === b.withdrawals.totalApprovedAmount
+        && a.withdrawals.totalApprovedTax === b.withdrawals.totalApprovedTax;
+    };
+
     for (const i in publicSettings.authorityNodes) {
-      console.log(`============= AUTHORITY ${i} ===============`);
-      console.log('[NODE INFO]');
-      console.log(`  Node IP: ${publicSettings.authorityNodes[i].location}`);
-      console.log(`  Wallet: ${publicSettings.authorityNodes[i].walletAddress}`);
-      console.log('[DEPOSITS]');
-      console.log(`  Count: ${stats[i].depositAddresses.count}`);
-      console.log(`  Total approved tax: ${dingo.fromSatoshi(stats[i].depositAddresses.totalApprovedTax)}`);
-      console.log('[WITHDRAWALS]');
-      console.log(`  Count: ${stats[i].withdrawals.count}`);
-      console.log(`  Total approved amount: ${dingo.fromSatoshi(stats[i].withdrawals.totalApprovedAmount)}`);
-      console.log(`  Total approved tax: ${dingo.fromSatoshi(stats[i].withdrawals.totalApprovedTax)}`);
-      if (i == publicSettings.authorityNodes.length - 1) {
-        console.log('============================================');
+      let hasConsensus = false;
+      for (const j in consensusStats) {
+        if (statsEquals(stats[i], consensusStats[j])) {
+          consensusNodes[j].push(i);
+          hasConsensus = true;
+          break;
+        }
+      }
+      if (!hasConsensus) {
+        consensusStats.push(stats[i]);
+        consensusNodes.push([i]);
       }
     }
+
+    let s = '';
+    for (const i in consensusStats) {
+      s += `============= CONSENSUS ${i} [${consensusNodes[i].length}/${publicSettings.authorityNodes.length}] ===============\n`;
+      s += '[DEPOSIT ADDRESSES]\n';
+      s += `  Count: ${consensusStats[i].depositAddresses.count}\n`
+      s += `  Total deposited amount: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalDepositedAmount)}\n`;
+      s += `  Total approved tax: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalApprovedTax)}\n`;
+      s += '[WITHDRAWALS]\n';
+      s += `  Count: ${consensusStats[i].withdrawals.count}\n`;
+      s += `  Total burned amount: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalBurnedAmount)}\n`
+      s += `  Total approved amount: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedAmount)}\n`;
+      s += `  Total approved tax: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedTax)}\n`;
+      s += '[NODES IN CONSENSUS]\n';
+      for (const j of consensusNodes[i]) {
+        s += `  ${publicSettings.authorityNodes[j].location} (${publicSettings.authorityNodes[j].walletAddress})\n`;
+      }
+      if (i == publicSettings.authorityNodes.length - 1) {
+        s += '===============================================\n';
+      }
+    }
+
+    res.send(s);
   });
 
 
