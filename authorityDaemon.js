@@ -114,7 +114,7 @@ function amountAfterTax(x) {
     res.send(createSignedMessage({ timestamp: Date.now() }));
   });
 
-  app.post('/generateDepositAddress', rateLimit({ windowMs: 60 * 1000, max: 1 }), async (req, res) => {
+  app.post('/generateDepositAddress', rateLimit({ windowMs: 20 * 1000, max: 1 }), async (req, res) => {
     const data = req.body;
     const mintAddress = data.mintAddress;
     if (!smartContract.isAddress(mintAddress)) {
@@ -127,7 +127,7 @@ function amountAfterTax(x) {
     }));
   });
 
-  app.post('/registerMintDepositAddress', rateLimit({ windowMs: 60 * 1000, max: 1 }), async (req, res) => {
+  app.post('/registerMintDepositAddress', rateLimit({ windowMs: 20 * 1000, max: 1 }), async (req, res) => {
     const data = req.body;
     if (data.generateDepositAddressResponses.length !== publicSettings.authorityNodes.length) {
       throw new Error('Incorrect authority count');
@@ -169,7 +169,7 @@ function amountAfterTax(x) {
     }));
   });
 
-  app.post('/queryMintBalance', async (req, res) => {
+  app.post('/queryMintBalance', rateLimit({ windowMs: 10 * 1000, max: 10 }), async (req, res) => {
     const data = req.body;
     const mintAddress = data.mintAddress;
     if (!smartContract.isAddress(mintAddress)) {
@@ -199,7 +199,7 @@ function amountAfterTax(x) {
     }
   });
 
-  app.post('/createMintTransaction', async (req, res) => {
+  app.post('/createMintTransaction', rateLimit({ windowMs: 5 * 1000, max: 1 }), async (req, res) => {
     const data = req.body;
     const mintAddress = data.mintAddress;
     if (!smartContract.isAddress(mintAddress)) {
@@ -233,7 +233,7 @@ function amountAfterTax(x) {
     }));
   });
 
-  app.post('/queryBurnHistory', async (req, res) => {
+  app.post('/queryBurnHistory', rateLimit({ windowMs: 10 * 1000, max: 10 }), async (req, res) => {
     const data = req.body;
     const burnAddress = data.burnAddress;
     if (!smartContract.isAddress(burnAddress)) {
@@ -254,7 +254,7 @@ function amountAfterTax(x) {
     }));
   });
 
-  app.post('/submitWithdrawal', async (req, res) => {
+  app.post('/submitWithdrawal', rateLimit({ windowMs: 1 * 1000, max: 5 }), async (req, res) => {
     const data = req.body;
     const burnAddress = data.burnAddress;
     const burnIndex = data.burnIndex;
@@ -301,6 +301,7 @@ function amountAfterTax(x) {
         }
       }, 0n).toString();
       stats.depositAddresses.totalApprovedTax = depositAddresses.reduce((a, b) => a + BigInt(b.approvedTax), 0n).toString();
+      stats.depositAddresses.remainingApprovableTax = (BigInt(stats.depositAddresses.totalApprovableTax) - BigInt(stats.depositAddresses.totalApprovedTax)).toString();
 
       const withdrawals = await database.getWithdrawals();
       stats.withdrawals.count = withdrawals.length;
@@ -318,6 +319,8 @@ function amountAfterTax(x) {
       }
       stats.withdrawals.totalApprovableAmount = stats.withdrawals.totalApprovableAmount.toString();
       stats.withdrawals.totalApprovableTax = stats.withdrawals.totalApprovableTax.toString();
+      stats.withdrawals.remainingApprovableAmount = (BigInt(stats.withdrawals.totalApprovableAmount) - BigInt(stats.withdrawals.totalApprovedAmount)).toString();
+      stats.withdrawals.remainingApprovableTax = (BigInt(stats.withdrawals.totalApprovableTax) - BigInt(stats.withdrawals.totalApprovedTax)).toString();
 
       res.send(createSignedMessage(stats));
     }
@@ -364,15 +367,18 @@ function amountAfterTax(x) {
       s += '[DEPOSIT ADDRESSES]\n';
       s += `  Count: ${consensusStats[i].depositAddresses.count}\n`
       s += `  Total deposited amount: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalDepositedAmount)}\n`;
-      s += `  Total approvable tax: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalApprovableTax)}\n`;
-      s += `  Total approved tax: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalApprovedTax)}\n`;
+      s += `  Total approved/approvable tax: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalApprovedTax)} / `;
+      s += `${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalApprovableTax)}`;
+      s += ` (Remaining: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.remainingApprovableTax)})\n`;
       s += '[WITHDRAWALS]\n';
       s += `  Count: ${consensusStats[i].withdrawals.count}\n`;
       s += `  Total burned amount: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalBurnedAmount)}\n`
-      s += `  Total approvable amount: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovableAmount)}\n`;
-      s += `  Total approved amount: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedAmount)}\n`;
-      s += `  Total approvable tax: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovableTax)}\n`;
-      s += `  Total approved tax: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedTax)}\n`;
+      s += `  Total approved/approvable amount: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedAmount)} / `;
+      s += `${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovableAmount)}`;
+      s += ` (Remaining: ${dingo.fromSatoshi(consensusStats[i].withdrawals.remainingApprovableAmount)})\n`;
+      s += `  Total approved/approvable tax: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedTax)} / `;
+      s += `${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovableTax)}`;
+      s += ` (Remaining: ${dingo.fromSatoshi(consensusStats[i].withdrawals.remainingApprovableTax)})\n`;
       s += '[NODES IN CONSENSUS]\n';
       for (const j of consensusNodes[i]) {
         s += `  Node ${j}: ${publicSettings.authorityNodes[j].location} (${publicSettings.authorityNodes[j].walletAddress})\n`;
@@ -582,7 +588,6 @@ function amountAfterTax(x) {
 
   app.post('/executePayouts', ipfilter([LOCALHOST]), async (req, res) => {
     const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts } = await computePendingPayouts();
-    await validatePayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
     const totalDepositTaxPayout = depositTaxPayouts.reduce((a, b) => a + BigInt(b.amount), 0n).toString();
     const totalWithdrawalPayout = withdrawalPayouts.reduce((a, b) => a + BigInt(b.amount), 0n).toString();
@@ -591,6 +596,7 @@ function amountAfterTax(x) {
     console.log(`Total withdrawal payout = ${dingo.fromSatoshi(totalWithdrawalPayout)}`);
     console.log(`Total withdrawal tax payout = ${dingo.fromSatoshi(totalWithdrawalTaxPayout)}`);
 
+    await validatePayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
     const { unspent, vouts } = await computeUnspentAndVouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
     // Compute approval chain and sign.
@@ -612,8 +618,10 @@ function amountAfterTax(x) {
     // Apply payouts.
     await applyPayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
-    for (const node of publicSettings.authorityNodes) {
+    for (const i in publicSettings.authorityNodes) {
+      const node = publicSettings.authorityNodes[i];
       if (node.walletAddress !== smartContract.getAccountAddress()) {
+        console.log(`Requesting approval from Node ${i} at ${node.location} (${node.walletAddress})...`);
         approvalChain = validateSignedMessage(
           (await axios.post(`${getAuthorityLink(node)}/approvePayouts`, createSignedMessage({
             depositTaxPayouts,
@@ -623,12 +631,22 @@ function amountAfterTax(x) {
           }))).data,
           node.walletAddress
         ).approvalChain;
+        console.log('  -> Success!');
       }
     }
+
+    console.log(`Sending raw transaction:\n${approvalChain}`);
+    const hash = await dingo.sendRawTranscation(approvalChain);
+    console.log(`Success! Transaction hash: ${hash}`);
+
+    res.send(createSignedMessage({
+      rawTransaction: approvalChain,
+      transactionHash: hash
+    }));
+
   });
 
   app.post('/approvePayouts', ipfilter([publicSettings.authorityNodes[publicSettings.payoutCoordinator].location]), async (req, res) => {
-    console.log(req);
 
     // Extract info.
     const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts, approvalChain } =

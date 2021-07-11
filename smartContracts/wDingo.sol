@@ -12,8 +12,6 @@ interface IBEP20 {
 
   function name() external view returns (string memory);
 
-  function getOwner() external view returns (address);
-
   function balanceOf(address account) external view returns (uint256);
 
   function transfer(address recipient, uint256 amount) external returns (bool);
@@ -91,43 +89,7 @@ library SafeMath {
   }
 }
 
-contract Ownable is Context {
-  address private _owner;
-
-  event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-
-  constructor () {
-    address msgSender = _msgSender();
-    _owner = msgSender;
-    emit OwnershipTransferred(address(0), msgSender);
-  }
-
-  function owner() public view returns (address) {
-    return _owner;
-  }
-
-  modifier onlyOwner() {
-    require(_owner == _msgSender(), "Ownable: caller is not the owner");
-    _;
-  }
-
-  function renounceOwnership() public onlyOwner {
-    emit OwnershipTransferred(_owner, address(0));
-    _owner = address(0);
-  }
-
-  function transferOwnership(address newOwner) public onlyOwner {
-    _transferOwnership(newOwner);
-  }
-
-  function _transferOwnership(address newOwner) internal {
-    require(newOwner != address(0), "Ownable: new owner is the zero address");
-    emit OwnershipTransferred(_owner, newOwner);
-    _owner = newOwner;
-  }
-}
-
-contract BEP20Token is Context, IBEP20, Ownable {
+contract BEP20Token is Context, IBEP20 {
   using SafeMath for uint256;
 
   mapping (address => uint256) private _balances;
@@ -138,17 +100,13 @@ contract BEP20Token is Context, IBEP20, Ownable {
   string private _name;
 
   constructor() {
-    _name = "Wrapped Dingo Token";
-    _symbol = "wDingo";
+    _name = "Wrapped Dingocoin";
+    _symbol = "wDingocoin";
     _decimals = 8;
     _totalSupply = 0;
     _balances[msg.sender] = _totalSupply;
 
     emit Transfer(address(0), msg.sender, _totalSupply);
-  }
-
-  function getOwner() override external view returns (address) {
-    return owner();
   }
 
   function decimals() override external view returns (uint8) {
