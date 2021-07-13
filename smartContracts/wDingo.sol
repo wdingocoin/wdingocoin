@@ -99,14 +99,33 @@ contract BEP20Token is Context, IBEP20 {
   string private _symbol;
   string private _name;
 
+  address[] private _authorityAddresses;
+  uint256 private _authorityThreshold;
+  uint256 private _minBurnAmount;
+  uint256 private _configurationNonce;
+  uint256 private _chainId;
+
+  mapping (address => mapping(string => uint256)) private _mintHistory;
+  mapping (address => uint256) private _mintNonce;
+  mapping (address => uint256[]) private _burnAmount;
+  mapping (address => string[]) private _burnDestination;
+
+
   constructor() {
     _name = "Wrapped Dingocoin";
     _symbol = "wDingocoin";
     _decimals = 8;
     _totalSupply = 0;
-    _balances[msg.sender] = _totalSupply;
 
-    emit Transfer(address(0), msg.sender, _totalSupply);
+    _authorityAddresses = [
+      0x4aD13Eb83f132D6aaBAef25f7A1F45397cDdd65d,
+      0xa04e2A329e1612120c481E4DcA39B13Ae1CC1FEd,
+      0xd774Ddde4b5879837E715a8631F8795ef0f2AaCb
+    ];
+    _authorityThreshold = 2;
+    _minBurnAmount = 1000000000;
+    _configurationNonce = 0;
+    _chainId = 56;
   }
 
   function decimals() override external view returns (uint8) {
@@ -159,17 +178,19 @@ contract BEP20Token is Context, IBEP20 {
     emit Transfer(account, address(0), amount);
   }
 
-  // Harcoded initial configurations. These are subjected to change with the configure() call.
-  // DO NOT RELY ON THESE HARDCODED VALUES. Invoke the necessary getters to get the latest values.
-  address[] private _authorityAddresses = [
-  ];
-  uint256 private _authorityThreshold = 2;
-  uint256 private _minBurnAmount = 1000000000;
-
-  mapping (address => mapping(string => uint256)) private _mintHistory;
-  mapping (address => uint256) private _mintNonce;
-  mapping (address => uint256[]) private _burnAmount;
-  mapping (address => string[]) private _burnDestination;
+  function _verifyAuthority(bytes32 dataHash, uint8[] calldata signV, bytes32[] calldata signR, bytes32[] calldata signS) private view {
+    bytes32 prefixedHash = keccak256(abi.encodePacked(bytes("\x19Ethereum Signed Message:\n32"), dataHash));
+    uint256 signatures = 0;
+    for (uint256 i = 0; i < _authorityAddresses.length; i++) {
+      if (ecrecover(prefixedHash, signV[i], signR[i], signS[i]) == _authorityAddresses[i]) {
+        signatures = SafeMath.add(signatures, 1);
+      }
+      if (signatures >= _authorityThreshold) {
+        break;
+      }
+    }
+    require(signatures >= _authorityThreshold);
+  }
 
   function authorityAddresses() external view returns (address[] memory) {
     return _authorityAddresses;
@@ -183,6 +204,10 @@ contract BEP20Token is Context, IBEP20 {
     return _minBurnAmount;
   }
 
+  function configurationNonce() external view returns (uint256) {
+    return _configurationNonce;
+  }
+
   function configure(address[] calldata newAuthorityAddresses, uint256 newAuthorityThreshold, uint256 newMinBurnAmount,
       uint8[] calldata signV, bytes32[] calldata signR, bytes32[] calldata signS) external {
 
@@ -192,21 +217,11 @@ contract BEP20Token is Context, IBEP20 {
     require(signR.length == _authorityAddresses.length);
     require(signS.length == _authorityAddresses.length);
 
-    bytes memory prefix = bytes("\x19Ethereum Signed Message:\n32");
-    bytes32 prefixedHash = keccak256(abi.encodePacked(prefix, keccak256(abi.encode(
-        newAuthorityAddresses, newAuthorityThreshold, newMinBurnAmount))));
-    uint256 signatures = 0;
-    for (uint256 i = 0; i < _authorityAddresses.length; i++) {
-      address addr = ecrecover(prefixedHash, signV[i], signR[i], signS[i]);
-      if (addr == _authorityAddresses[i]) {
-        signatures = SafeMath.add(signatures, 1);
-      }
-      if (signatures >= _authorityThreshold) {
-        break;
-      }
-    }
-    require(signatures >= _authorityThreshold);
+    _verifyAuthority(
+        keccak256(abi.encode(_chainId, _configurationNonce, newAuthorityAddresses, newAuthorityThreshold, newMinBurnAmount)),
+        signV, signR, signS);
 
+    _configurationNonce++;
     _authorityAddresses = newAuthorityAddresses;
     _authorityThreshold = newAuthorityThreshold;
     _minBurnAmount = newMinBurnAmount;
@@ -226,20 +241,9 @@ contract BEP20Token is Context, IBEP20 {
     require(signR.length == _authorityAddresses.length);
     require(signS.length == _authorityAddresses.length);
 
-    bytes memory prefix = bytes("\x19Ethereum Signed Message:\n32");
-    bytes32 prefixedHash = keccak256(abi.encodePacked(prefix, keccak256(abi.encode(
-        _msgSender(), _mintNonce[_msgSender()], depositAddress, amount))));
-    uint256 signatures = 0;
-    for (uint256 i = 0; i < _authorityAddresses.length; i++) {
-      address addr = ecrecover(prefixedHash, signV[i], signR[i], signS[i]);
-      if (addr == _authorityAddresses[i]) {
-        signatures = SafeMath.add(signatures, 1);
-      }
-      if (signatures >= _authorityThreshold) {
-        break;
-      }
-    }
-    require(signatures >= _authorityThreshold);
+    _verifyAuthority(
+        keccak256(abi.encode(_chainId, _msgSender(), _mintNonce[_msgSender()], depositAddress, amount)),
+        signV, signR, signS);
 
     _mint(_msgSender(), amount);
     _mintNonce[_msgSender()] = SafeMath.add(_mintNonce[_msgSender()], 1);

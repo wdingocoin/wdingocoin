@@ -9,6 +9,7 @@ const axios = require('axios');
 const rateLimit = require("express-rate-limit");
 const ipfilter = require('express-ipfilter').IpFilter
 const morgan = require('morgan');
+const Table = require('tty-table');
 
 const LOCALHOST = '127.0.0.1';
 
@@ -183,7 +184,7 @@ function amountAfterTax(x) {
     } else {
       // Retrieve deposited amount.
       const depositedAmount = dingo.toSatoshi((await dingo.getReceivedAmountByAddress(dingoSettings.confirmations, depositAddress)).toString());
-      const depositedAmountAfterTax = 0n; // amountAfterTax(depositedAmount);
+      const depositedAmountAfterTax = meetsTax(depositedAmount) ? amountAfterTax(depositedAmount) : 0n;
 
       // Retrieve minted amount.
       const {mintNonce, mintedAmount} = await smartContract.getMintHistory(mintAddress, depositAddress);
@@ -304,7 +305,9 @@ function amountAfterTax(x) {
 
       const withdrawals = await database.getWithdrawals();
       stats.withdrawals.count = withdrawals.length;
-      const { burnAmounts } = await smartContract.getBurnHistoryMultiple(withdrawals.map((x) => x.burnAddress), withdrawals.map((x) => x.burnIndex));
+      const burnAmounts = withdrawals.length === 0
+        ? []
+        : (await smartContract.getBurnHistoryMultiple(withdrawals.map((x) => x.burnAddress), withdrawals.map((x) => x.burnIndex))).burnAmounts;
       stats.withdrawals.totalBurnedAmount = burnAmounts.reduce((a, b) => a + BigInt(b.toString()), 0n).toString();
       stats.withdrawals.totalApprovableAmount = 0n;
       stats.withdrawals.totalApprovedAmount = withdrawals.reduce((a, b) => a + BigInt(b.approvedAmount), 0n).toString();
@@ -367,22 +370,74 @@ function amountAfterTax(x) {
       }
     }
 
+    const dingoWidth = 17;
+
+    const depositStatsFlattened = [];
+    for (const i in stats) {
+      const stat = stats[i];
+      depositStatsFlattened.push([
+        i,
+        stat.depositAddresses.count,
+        stat.depositAddresses.totalDepositedAmount,
+        stat.depositAddresses.totalApprovedTax,
+        stat.depositAddresses.totalApprovableTax,
+        stat.depositAddresses.remainingApprovableTax
+      ]);
+    }
+    const depositHeader = [
+      { alias: "Node", formatter: function (x) { return this.style(x, "bgGreen", "black"); }},
+      { alias: "Addresses" },
+      { alias: "Total Deposited", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approvable Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Remaining Tax", formatter: dingo.fromSatoshi, width: dingoWidth }
+    ];
+    console.log(Table(depositHeader, depositStatsFlattened).render());
+
+    const withdrawalStatsFlattened = [];
+    for (const i in stats) {
+      const stat = stats[i];
+      withdrawalStatsFlattened.push([
+        i,
+        stat.withdrawals.count.toString(),
+        stat.withdrawals.totalBurnedAmount,
+        stat.withdrawals.totalApprovedAmount,
+        stat.withdrawals.totalApprovableAmount,
+        stat.withdrawals.remainingApprovableAmount,
+        stat.withdrawals.totalApprovedTax,
+        stat.withdrawals.totalApprovableTax,
+        stat.withdrawals.remainingApprovableTax
+      ]);
+    }
+    const withdrawalHeader = [
+      { alias: "Node", formatter: function (x) { return this.style(x, "bgGreen", "black"); }},
+      { alias: "Count", formatter: function(x) { return x.toString(); } },
+      { alias: "Total Burned", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approved Withdrawals", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approvable Withdrawals", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Remaining Withdrawals", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approvable Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Remaining Tax", formatter: dingo.fromSatoshi, width: dingoWidth }
+    ];
+    console.log(Table(withdrawalHeader, withdrawalStatsFlattened).render());
+
     let s = '';
     for (const i in consensusStats) {
       s += `============= CONSENSUS ${i} [${consensusNodes[i].length}/${publicSettings.authorityNodes.length}] ===============\n`;
       s += '[DEPOSIT ADDRESSES]\n';
       s += `  Count: ${consensusStats[i].depositAddresses.count}\n`
       s += `  Total deposited amount: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalDepositedAmount)}\n`;
-      s += `  Total approved/approvable tax: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalApprovedTax)} / `;
+      s += `  Total tax (approved/approvable): ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalApprovedTax)} / `;
       s += `${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalApprovableTax)}`;
       s += ` (Remaining: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.remainingApprovableTax)})\n`;
       s += '[WITHDRAWALS]\n';
       s += `  Count: ${consensusStats[i].withdrawals.count}\n`;
       s += `  Total burned amount: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalBurnedAmount)}\n`
-      s += `  Total approved/approvable amount: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedAmount)} / `;
+      s += `  Total withdrawal (approved/approvable): ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedAmount)} / `;
       s += `${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovableAmount)}`;
       s += ` (Remaining: ${dingo.fromSatoshi(consensusStats[i].withdrawals.remainingApprovableAmount)})\n`;
-      s += `  Total approved/approvable tax: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedTax)} / `;
+      s += `  Total tax (approved/approvable): ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedTax)} / `;
       s += `${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovableTax)}`;
       s += ` (Remaining: ${dingo.fromSatoshi(consensusStats[i].withdrawals.remainingApprovableTax)})\n`;
       s += '[UTXOS]\n'
@@ -596,56 +651,45 @@ function amountAfterTax(x) {
   };
 
   app.post('/executePayouts', ipfilter([LOCALHOST]), async (req, res) => {
-    const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts } = await computePendingPayouts();
+    let approvalChain = await database.acquire(async () => {
 
-    const totalDepositTaxPayout = depositTaxPayouts.reduce((a, b) => a + BigInt(b.amount), 0n).toString();
-    const totalWithdrawalPayout = withdrawalPayouts.reduce((a, b) => a + BigInt(b.amount), 0n).toString();
-    const totalWithdrawalTaxPayout = withdrawalTaxPayouts.reduce((a, b) => a + BigInt(b.amount), 0n).toString();
-    console.log(`Total deposit tax payout = ${dingo.fromSatoshi(totalDepositTaxPayout)}`);
-    console.log(`Total withdrawal payout = ${dingo.fromSatoshi(totalWithdrawalPayout)}`);
-    console.log(`Total withdrawal tax payout = ${dingo.fromSatoshi(totalWithdrawalTaxPayout)}`);
+      const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts } = await computePendingPayouts();
 
-    await validatePayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
-    const { unspent, vouts } = await computeUnspentAndVouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
+      const totalDepositTaxPayout = depositTaxPayouts.reduce((a, b) => a + BigInt(b.amount), 0n).toString();
+      const totalWithdrawalPayout = withdrawalPayouts.reduce((a, b) => a + BigInt(b.amount), 0n).toString();
+      const totalWithdrawalTaxPayout = withdrawalTaxPayouts.reduce((a, b) => a + BigInt(b.amount), 0n).toString();
+      console.log(`Total deposit tax payout = ${dingo.fromSatoshi(totalDepositTaxPayout)}`);
+      console.log(`Total withdrawal payout = ${dingo.fromSatoshi(totalWithdrawalPayout)}`);
+      console.log(`Total withdrawal tax payout = ${dingo.fromSatoshi(totalWithdrawalTaxPayout)}`);
 
-    // Compute approval chain and sign.
-    let approvalChain = await dingo.createRawTransaction(
-      unspent, vouts,
-      {
-        depositTaxPayouts: depositTaxPayouts,
-        withdrawalPayouts: withdrawalPayouts,
-        withdrawalTaxPayouts: withdrawalTaxPayouts,
-        unspent: unspent,
-        vouts: vouts
-      });
-    approvalChain = await dingo.verifyAndSignRawTransaction(
-      unspent, vouts,
-      {
-        depositTaxPayouts: depositTaxPayouts,
-        withdrawalPayouts: withdrawalPayouts,
-        withdrawalTaxPayouts: withdrawalTaxPayouts,
-        unspent: unspent,
-        vouts: vouts
-      }, approvalChain);
+      await validatePayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
+      const { unspent, vouts } = await computeUnspentAndVouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
-    // Apply payouts.
-    await applyPayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
+      // Compute approval chain.
+      return await dingo.createRawTransaction(
+        unspent, vouts,
+        {
+          depositTaxPayouts: depositTaxPayouts,
+          withdrawalPayouts: withdrawalPayouts,
+          withdrawalTaxPayouts: withdrawalTaxPayouts,
+          unspent: unspent,
+          vouts: vouts
+        });
+    });
 
     for (const i in publicSettings.authorityNodes) {
       const node = publicSettings.authorityNodes[i];
-      if (node.walletAddress !== smartContract.getAccountAddress()) {
-        console.log(`Requesting approval from Node ${i} at ${node.location} (${node.walletAddress})...`);
-        approvalChain = validateSignedMessage(
-          (await axios.post(`${getAuthorityLink(node)}/approvePayouts`, createSignedMessage({
-            depositTaxPayouts,
-            withdrawalPayouts,
-            withdrawalTaxPayouts,
-            approvalChain: approvalChain
-          }))).data,
-          node.walletAddress
-        ).approvalChain;
-        console.log('  -> Success!');
-      }
+      console.log(`Requesting approval from Node ${i} at ${node.location} (${node.walletAddress})...`);
+      approvalChain = validateSignedMessage(
+        (await axios.post(`${getAuthorityLink(node)}/approvePayouts`, createSignedMessage({
+          depositTaxPayouts,
+          withdrawalPayouts,
+          withdrawalTaxPayouts,
+          approvalChain: approvalChain
+        }))).data,
+        node.walletAddress
+      ).approvalChain;
+      console.log('  -> Success!');
     }
 
     console.log(`Sending raw transaction:\n${approvalChain}`);
@@ -660,29 +704,30 @@ function amountAfterTax(x) {
   });
 
   app.post('/approvePayouts', ipfilter([publicSettings.authorityNodes[publicSettings.payoutCoordinator].location]), async (req, res) => {
+    await database.acquire(async () => {
+      // Extract info.
+      const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts, approvalChain } =
+        validateSignedMessage(req.body, publicSettings.authorityNodes[publicSettings.payoutCoordinator].walletAddress);
 
-    // Extract info.
-    const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts, approvalChain } =
-      validateSignedMessage(req.body, publicSettings.authorityNodes[publicSettings.payoutCoordinator].walletAddress);
+      // Validate payouts.
+      await validatePayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
-    // Validate payouts.
-    await validatePayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
+      // Compute unspent and vouts.
+      const { unspent, vouts } = await computeUnspentAndVouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
-    // Compute unspent and vouts.
-    const { unspent, vouts } = await computeUnspentAndVouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
+      // Validate vouts and sign.
+      const approvalChainNext = await dingo.verifyAndSignRawTransaction(
+        unspent, vouts,
+        {
+          depositTaxPayouts: depositTaxPayouts,
+          withdrawalPayouts: withdrawalPayouts,
+          withdrawalTaxPayouts: withdrawalTaxPayouts
+        }, approvalChain);
 
-    // Validate vouts and sign.
-    const approvalChainNext = await dingo.verifyAndSignRawTransaction(
-      unspent, vouts,
-      {
-        depositTaxPayouts: depositTaxPayouts,
-        withdrawalPayouts: withdrawalPayouts,
-        withdrawalTaxPayouts: withdrawalTaxPayouts
-      }, approvalChain);
+      await applyPayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
-    await applyPayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
-
-    res.send(createSignedMessage({ approvalChain: approvalChainNext }));
+      res.send(createSignedMessage({ approvalChain: approvalChainNext }));
+    });
   });
 
   app.listen(publicSettings.port, () => {

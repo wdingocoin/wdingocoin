@@ -68,10 +68,10 @@ function getMinBurnAmount() {
   return contract.methods.minBurnAmount().call();
 }
 
-function signConfigure(newAuthorityAddresses, newAuthorityThreshold, newMinBurnAmount) {
+function signConfigure(chainId, nonce, newAuthorityAddresses, newAuthorityThreshold, newMinBurnAmount) {
   const encoded = web3.eth.abi.encodeParameters(
-    ['address[]', 'uint8', 'uint256'],
-    [newAuthorityAddresses, newAuthorityThreshold, newMinBurnAmount]
+    ['uint256', 'uint256', 'address[]', 'uint8', 'uint256'],
+    [chainId, nonce, newAuthorityAddresses, newAuthorityThreshold, newMinBurnAmount]
   );
   return web3.eth.accounts.sign(web3.utils.keccak256(encoded), account.privateKey);
 }
@@ -85,10 +85,10 @@ async function getMintHistory(address, depositAddress) {
   return { mintNonce: result['0'], mintedAmount: result['1'] }
 }
 
-function signMintTransaction(mintAddress, nonce, depositAddress, amount) {
+function signMintTransaction(chainId, mintAddress, nonce, depositAddress, amount) {
   const encoded = web3.eth.abi.encodeParameters(
-    ['address', 'uint256', 'string', 'uint256'],
-    [mintAddress, nonce, depositAddress, amount]
+    ['uint256', 'address', 'uint256', 'string', 'uint256'],
+    [chainId, mintAddress, nonce, depositAddress, amount]
   );
   return web3.eth.accounts.sign(web3.utils.keccak256(encoded), account.privateKey);
 }
