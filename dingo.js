@@ -126,8 +126,8 @@ async function getReceivedAmountByAddresses(confirmations, addresses) {
   return result;
 }
 
-function listUnspent(confirmations, addresses, changeAddress) {
-  return callRpc('listunspent', [confirmations, 9999999, addresses.concat([changeAddress])]);
+function listUnspent(confirmations, addresses) {
+  return callRpc('listunspent', [confirmations, 9999999, addresses]);
 }
 
 function decodeRawTranscation(hex) {

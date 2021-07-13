@@ -90,7 +90,6 @@ function amountAfterTax(x) {
 
 (async function main() {
 
-  dingo.walletPassphrase(' ');
 
   const args = process.argv.slice(2);
   const settingsFolder = args[0];
@@ -184,7 +183,7 @@ function amountAfterTax(x) {
     } else {
       // Retrieve deposited amount.
       const depositedAmount = dingo.toSatoshi((await dingo.getReceivedAmountByAddress(dingoSettings.confirmations, depositAddress)).toString());
-      const depositedAmountAfterTax = amountAfterTax(depositedAmount);
+      const depositedAmountAfterTax = 0n; // amountAfterTax(depositedAmount);
 
       // Retrieve minted amount.
       const {mintNonce, mintedAmount} = await smartContract.getMintHistory(mintAddress, depositAddress);
@@ -286,7 +285,7 @@ function amountAfterTax(x) {
     rateLimit({ windowMs: 5 * 1000, max: 1 }),
     ipfilter(publicSettings.authorityNodes.map((x) => x.location).concat([LOCALHOST])),
     async (req, res) => {
-      const stats = { depositAddresses: {}, withdrawals: {} };
+      const stats = { depositAddresses: {}, withdrawals: {}, utxos: {} };
 
       const depositAddresses = await database.getMintDepositAddresses();
       stats.depositAddresses.count = depositAddresses.length;
@@ -322,6 +321,11 @@ function amountAfterTax(x) {
       stats.withdrawals.remainingApprovableAmount = (BigInt(stats.withdrawals.totalApprovableAmount) - BigInt(stats.withdrawals.totalApprovedAmount)).toString();
       stats.withdrawals.remainingApprovableTax = (BigInt(stats.withdrawals.totalApprovableTax) - BigInt(stats.withdrawals.totalApprovedTax)).toString();
 
+      const changeUtxos = await dingo.listUnspent(dingoSettings.confirmations, [dingoSettings.changeAddress]);
+      const depositUtxos = await dingo.listUnspent(dingoSettings.confirmations, depositAddresses.map((x) => x.depositAddress));
+      stats.utxos.totalChangeBalance = changeUtxos.reduce((a, b) => a + BigInt(dingo.toSatoshi(b.amount.toString())), 0n).toString();
+      stats.utxos.totalDepositsBalance = depositUtxos.reduce((a, b) => a + BigInt(dingo.toSatoshi(b.amount.toString())), 0n).toString();
+
       res.send(createSignedMessage(stats));
     }
   );
@@ -343,7 +347,9 @@ function amountAfterTax(x) {
         && a.withdrawals.totalApprovableAmount === b.withdrawals.totalApprovableAmount
         && a.withdrawals.totalApprovedAmount === b.withdrawals.totalApprovedAmount
         && a.withdrawals.totalApprovableTax === b.withdrawals.totalApprovableTax
-        && a.withdrawals.totalApprovedTax === b.withdrawals.totalApprovedTax;
+        && a.withdrawals.totalApprovedTax === b.withdrawals.totalApprovedTax
+        && a.utxos.totalChangeBalance === b.utxos.totalChangeBalance
+        && a.utxos.totalDepositsBalance === b.utxos.totalDepositsBalance;
     };
 
     for (const i in publicSettings.authorityNodes) {
@@ -379,6 +385,9 @@ function amountAfterTax(x) {
       s += `  Total approved/approvable tax: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedTax)} / `;
       s += `${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovableTax)}`;
       s += ` (Remaining: ${dingo.fromSatoshi(consensusStats[i].withdrawals.remainingApprovableTax)})\n`;
+      s += '[UTXOS]\n'
+      s += `  Change balance: ${dingo.fromSatoshi(consensusStats[i].utxos.totalChangeBalance)} (${dingoSettings.changeAddress})\n`;
+      s += `  Deposits balance: ${dingo.fromSatoshi(consensusStats[i].utxos.totalDepositsBalance)}\n`;
       s += '[NODES IN CONSENSUS]\n';
       for (const j of consensusNodes[i]) {
         s += `  Node ${j}: ${publicSettings.authorityNodes[j].location} (${publicSettings.authorityNodes[j].walletAddress})\n`;
@@ -542,7 +551,7 @@ function amountAfterTax(x) {
     // Compute change.
     const deposited = await dingo.listReceivedByAddress(dingoSettings.confirmations);
     const nonEmptyMintDepositAddresses = (await database.getMintDepositAddresses(Object.keys(deposited)));
-    const unspent = await dingo.listUnspent(dingoSettings.confirmations, nonEmptyMintDepositAddresses.map((x) => x.depositAddress), dingoSettings.changeAddress);
+    const unspent = await dingo.listUnspent(dingoSettings.confirmations, nonEmptyMintDepositAddresses.map((x) => x.depositAddress).concat(dingoSettings.changeAddress));
     const totalUnspent = unspent.reduce((a, b) => a + BigInt(dingo.toSatoshi(b.amount.toString())), BigInt(0));
     const change = totalUnspent - totalPayout - FLAT_FEE; // Rounding errors from taxPayout / N is absorbed into change here.
     if (change < 0) {
@@ -605,14 +614,18 @@ function amountAfterTax(x) {
       {
         depositTaxPayouts: depositTaxPayouts,
         withdrawalPayouts: withdrawalPayouts,
-        withdrawalTaxPayouts: withdrawalTaxPayouts
+        withdrawalTaxPayouts: withdrawalTaxPayouts,
+        unspent: unspent,
+        vouts: vouts
       });
     approvalChain = await dingo.verifyAndSignRawTransaction(
       unspent, vouts,
       {
         depositTaxPayouts: depositTaxPayouts,
         withdrawalPayouts: withdrawalPayouts,
-        withdrawalTaxPayouts: withdrawalTaxPayouts
+        withdrawalTaxPayouts: withdrawalTaxPayouts,
+        unspent: unspent,
+        vouts: vouts
       }, approvalChain);
 
     // Apply payouts.
