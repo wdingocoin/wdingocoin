@@ -108,6 +108,8 @@ function amountAfterTax(x) {
   smartContract.loadAccount(privateSettings.walletPrivateKey);
   database.load(databaseSettings.databasePath);
 
+  const createIpFilter = (x) => ipfilter(x, { log: false });
+
   const app = express();
   app.use(cors());
   app.use(express.json());
@@ -287,7 +289,7 @@ function amountAfterTax(x) {
 
   app.post('/stats',
     rateLimit({ windowMs: 5 * 1000, max: 1 }),
-    ipfilter(publicSettings.authorityNodes.map((x) => x.location).concat([LOCALHOST])),
+    createIpFilter(publicSettings.authorityNodes.map((x) => x.location).concat([LOCALHOST])),
     asyncHandler(async (req, res, next) => {
       const stats = {
         version: {
@@ -354,9 +356,14 @@ function amountAfterTax(x) {
     })
   );
 
-  app.post('/consensus', ipfilter([LOCALHOST]), asyncHandler(async (req, res, next) => {
-    const stats = await Promise.all(publicSettings.authorityNodes.map(
-      async (x) => validateSignedMessage((await axios.post(`${getAuthorityLink(x)}/stats`)).data, x.walletAddress)));
+  app.post('/consensus', createIpFilter([LOCALHOST]), asyncHandler(async (req, res, next) => {
+    const stats = await Promise.all(publicSettings.authorityNodes.map(async (x) => {
+      try {
+        return validateSignedMessage((await axios.post(`${getAuthorityLink(x)}/stats`)).data, x.walletAddress);
+      } catch (err) {
+        return undefined;
+      }
+    }));
 
     // Shared configurations.
     const dingoWidth = 20;
@@ -365,15 +372,33 @@ function amountAfterTax(x) {
         return this.style('YES', 'bgGreen', 'black');
       }
 
-      let allSame = true;
+      let data = undefined;
       for (const row of rowData) {
-        if (row[columnIndex] !== rowData[0][columnIndex]) {
-          return this.style('NO', 'bgRed', 'black');
+        if (row[columnIndex] !== undefined && row[columnIndex] !== null && row[columnIndex] !== '') {
+          if (data === undefined) {
+            data = row[columnIndex];
+          } else if (row[columnIndex] !== data) {
+            return this.style('NO', 'bgRed', 'black');
+          }
         }
       }
       return this.style('YES', 'bgGreen', 'black');
     }
-    const nodeHeader = { alias: "Node", width: 11, formatter: function (x) { return this.style(x, "bgWhite", "black"); }};
+    const nodeHeader = { alias: "Node", width: 11, formatter: function (x) {
+      if (!x.startsWith('UNREACHABLE')) {
+        return this.style(x, "bgWhite", "black");
+      } else {
+        return this.style(x.replace('UNREACHABLE', ''), "bgRed", "black");
+      }
+    }};
+    function satoshiFormatter(x) {
+      if (x === null || x === undefined || typeof(x) !== 'string' || x === '') {
+        return '';
+      } else {
+        return dingo.fromSatoshi(x);
+      }
+    };
+
 
     let s = '';
 
@@ -382,12 +407,16 @@ function amountAfterTax(x) {
     const versionFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
-      versionFlattened.push([
-        i,
-        stat.version.repository.toString(),
-        stat.version.hash.toString(),
-       (new Date(stat.version.timestamp * 1000)).toUTCString()
-      ]);
+      if (stat === undefined) {
+        versionFlattened.push([i, '', '', '']);
+      } else {
+        versionFlattened.push([
+          i,
+          stat.version.repository.toString(),
+          stat.version.hash.toString(),
+         (new Date(stat.version.timestamp * 1000)).toUTCString()
+        ]);
+      }
     }
     const versionHeader = [
       nodeHeader,
@@ -404,12 +433,16 @@ function amountAfterTax(x) {
     const publicSettingsFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
-      publicSettingsFlattened.push([
-        i,
-        stat.publicSettings.payoutCoordinator.toString(),
-        stat.publicSettings.authorityThreshold.toString(),
-        stat.publicSettings.authorityNodes.map((x) => `${x.location}:${x.port}\\${x.walletAddress}`).join(' ')
-      ]);
+      if (stat === undefined) {
+        publicSettingsFlattened.push(['UNREACHABLE' + i, '', '', ''])
+      } else {
+        publicSettingsFlattened.push([
+          i,
+          stat.publicSettings.payoutCoordinator.toString(),
+          stat.publicSettings.authorityThreshold.toString(),
+          stat.publicSettings.authorityNodes.map((x) => `${x.location}:${x.port}\\${x.walletAddress}`).join(' ')
+        ]);
+      }
     }
     const publicSettingsHeader = [
       nodeHeader,
@@ -426,12 +459,16 @@ function amountAfterTax(x) {
     const dingoSettingsFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
-      dingoSettingsFlattened.push([
-        i,
-        stat.dingoSettings.changeAddress,
-        stat.dingoSettings.confirmations.toString(),
-        stat.dingoSettings.taxPayoutAddresses.join(' ')
-      ]);
+      if (stat === undefined) {
+        dingoSettingsFlattened.push(['UNREACHABLE' + i, '', '', '']);
+      } else {
+        dingoSettingsFlattened.push([
+          i,
+          stat.dingoSettings.changeAddress,
+          stat.dingoSettings.confirmations.toString(),
+          stat.dingoSettings.taxPayoutAddresses.join(' ')
+        ]);
+      }
     }
     const dingoSettingsHeader = [
       nodeHeader,
@@ -448,12 +485,16 @@ function amountAfterTax(x) {
     const smartContractSettingsFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
-      smartContractSettingsFlattened.push([
-        i,
-        stat.smartContractSettings.provider,
-        stat.smartContractSettings.chainId,
-        stat.smartContractSettings.contractAddress
-      ]);
+      if (stat === undefined) {
+        smartContractSettingsFlattened.push(['UNREACHABLE' + i, '', '', '']);
+      } else {
+        smartContractSettingsFlattened.push([
+          i,
+          stat.smartContractSettings.provider,
+          stat.smartContractSettings.chainId,
+          stat.smartContractSettings.contractAddress
+        ]);
+      }
     }
     const smartContractSettingsHeader = [
       nodeHeader,
@@ -470,22 +511,26 @@ function amountAfterTax(x) {
     const depositStatsFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
-      depositStatsFlattened.push([
-        i,
-        stat.depositAddresses.count.toString(),
-        stat.depositAddresses.totalDepositedAmount,
-        stat.depositAddresses.totalApprovableTax,
-        stat.depositAddresses.totalApprovedTax,
-        stat.depositAddresses.remainingApprovableTax
-      ]);
+      if (stat === undefined) {
+        depositStatsFlattened.push(['UNREACHABLE' + i, '', '', '', '', '']);
+      } else {
+        depositStatsFlattened.push([
+          i,
+          stat.depositAddresses.count.toString(),
+          stat.depositAddresses.totalDepositedAmount,
+          stat.depositAddresses.totalApprovableTax,
+          stat.depositAddresses.totalApprovedTax,
+          stat.depositAddresses.remainingApprovableTax
+        ]);
+      }
     }
     const depositHeader = [
       nodeHeader,
       { alias: "Addresses" },
-      { alias: "Total Deposited", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approvable Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Remaining Tax", formatter: dingo.fromSatoshi, width: dingoWidth }
+      { alias: "Total Deposited", formatter: satoshiFormatter, width: dingoWidth },
+      { alias: "Approvable Tax", formatter: satoshiFormatter, width: dingoWidth },
+      { alias: "Approved Tax", formatter: satoshiFormatter, width: dingoWidth },
+      { alias: "Remaining Tax", formatter: satoshiFormatter, width: dingoWidth }
     ];
     const depositFooter = ['Consensus'].concat(Array(depositHeader.length - 1).fill(consensusCell));
     s += '\n\n  [Deposit Addresses]';
@@ -496,28 +541,32 @@ function amountAfterTax(x) {
     const withdrawalStatsFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
-      withdrawalStatsFlattened.push([
-        i,
-        stat.withdrawals.count.toString(),
-        stat.withdrawals.totalBurnedAmount,
-        stat.withdrawals.totalApprovableAmount,
-        stat.withdrawals.totalApprovedAmount,
-        stat.withdrawals.remainingApprovableAmount,
-        stat.withdrawals.totalApprovableTax,
-        stat.withdrawals.totalApprovedTax,
-        stat.withdrawals.remainingApprovableTax
-      ]);
+      if (stat === undefined) {
+        withdrawalStatsFlattened.push(['UNREACHABLE' + i, '', '', '', '', '', '', '', '']);
+      } else {
+        withdrawalStatsFlattened.push([
+          i,
+          stat.withdrawals.count.toString(),
+          stat.withdrawals.totalBurnedAmount,
+          stat.withdrawals.totalApprovableAmount,
+          stat.withdrawals.totalApprovedAmount,
+          stat.withdrawals.remainingApprovableAmount,
+          stat.withdrawals.totalApprovableTax,
+          stat.withdrawals.totalApprovedTax,
+          stat.withdrawals.remainingApprovableTax
+        ]);
+      }
     }
     const withdrawalHeader = [
       nodeHeader,
       { alias: "Submissions" },
-      { alias: "Total Burned", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approvable Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approved Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Remaining Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approvable Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Remaining Tax", formatter: dingo.fromSatoshi, width: dingoWidth }
+      { alias: "Total Burned", formatter: satoshiFormatter, width: dingoWidth },
+      { alias: "Approvable Amount", formatter: satoshiFormatter, width: dingoWidth },
+      { alias: "Approved Amount", formatter: satoshiFormatter, width: dingoWidth },
+      { alias: "Remaining Amount", formatter: satoshiFormatter, width: dingoWidth },
+      { alias: "Approvable Tax", formatter: satoshiFormatter, width: dingoWidth },
+      { alias: "Approved Tax", formatter: satoshiFormatter, width: dingoWidth },
+      { alias: "Remaining Tax", formatter: satoshiFormatter, width: dingoWidth }
     ];
     const withdrawalFooter = ['Consensus'].concat(Array(withdrawalHeader.length - 1).fill(consensusCell));
     s += '\n\n  [Submitted Withdrawals]';
@@ -528,16 +577,20 @@ function amountAfterTax(x) {
     const utxoStatsFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
-      utxoStatsFlattened.push([
-        i,
-        stat.utxos.totalChangeBalance,
-        stat.utxos.totalDepositsBalance
-      ]);
+      if (stat === undefined) {
+        utxoStatsFlattened.push(['UNREACHABLE' + i, '', '']);
+      } else {
+        utxoStatsFlattened.push([
+          i,
+          stat.utxos.totalChangeBalance,
+          stat.utxos.totalDepositsBalance
+        ]);
+      }
     }
     const utxoHeader = [
       nodeHeader,
-      { alias: "Change Balance", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Deposits Balance", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Change Balance", formatter: satoshiFormatter, width: dingoWidth },
+      { alias: "Deposits Balance", formatter: satoshiFormatter, width: dingoWidth },
     ];
     const utxoFooter = ['Consensus'].concat(Array(utxoHeader.length - 1).fill(consensusCell));
     s += '\n\n  [UTXOs]';
@@ -743,7 +796,7 @@ function amountAfterTax(x) {
     await database.updateWithdrawals(withdrawals);
   };
 
-  app.post('/executePayouts', ipfilter([LOCALHOST]), asyncHandler(async (req, res, next) => {
+  app.post('/executePayouts', createIpFilter([LOCALHOST]), asyncHandler(async (req, res, next) => {
     let depositTaxPayouts = undefined;
     let withdrawalPayouts = undefined;
     let withdrawalTaxPayouts = undefined;
@@ -804,7 +857,7 @@ function amountAfterTax(x) {
 
   }));
 
-  app.post('/approvePayouts', ipfilter([publicSettings.authorityNodes[publicSettings.payoutCoordinator].location]), asyncHandler(async (req, res, next) => {
+  app.post('/approvePayouts', createIpFilter([publicSettings.authorityNodes[publicSettings.payoutCoordinator].location]), asyncHandler(async (req, res, next) => {
     await database.acquire(async () => {
       // Extract info.
       const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts, approvalChain } =

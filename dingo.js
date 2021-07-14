@@ -30,14 +30,14 @@ module.exports = {
 };
 
 function toSatoshi(x) {
-  if (typeof(x) !== 'string') {
+  if (x === null || x === undefined || typeof(x) !== 'string' || x === '') {
     throw new Error('Expected string input');
   }
   return (BigInt(Web3.utils.toWei(x, 'gwei')) / 10n).toString();
 }
 
 function fromSatoshi(x) {
-  if (typeof(x) !== 'string') {
+  if (x === null || x === undefined || typeof(x) !== 'string' || x === '') {
     throw new Error('Expected string input');
   }
   return (Web3.utils.fromWei((BigInt(x) * 10n).toString(), 'gwei')).toString();
