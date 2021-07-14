@@ -1,6 +1,7 @@
 "use strict";
 
 const express = require('express');
+const asyncHandler = require('express-async-handler')
 const database = require('./database.js');
 const dingo = require('./dingo');
 const smartContract = require('./smartContract.js');
@@ -94,7 +95,6 @@ function amountAfterTax(x) {
 
 (async function main() {
 
-
   const args = process.argv.slice(2);
   const settingsFolder = args[0];
   const databaseSettings = JSON.parse(fs.readFileSync(`${settingsFolder}/database.json`));
@@ -113,11 +113,11 @@ function amountAfterTax(x) {
   app.use(express.json());
   //app.use(morgan('combined'));
 
-  app.post('/ping', rateLimit({ windowMs: 10 * 1000, max: 10}), async (req, res) => {
+  app.post('/ping', rateLimit({ windowMs: 10 * 1000, max: 10}), asyncHandler(async (req, res, next) => {
     res.send(createSignedMessage({ timestamp: Date.now() }));
-  });
+  }));
 
-  app.post('/generateDepositAddress', rateLimit({ windowMs: 20 * 1000, max: 1 }), async (req, res) => {
+  app.post('/generateDepositAddress', rateLimit({ windowMs: 20 * 1000, max: 1 }), asyncHandler(async (req, res, next) => {
     const data = req.body;
     const mintAddress = data.mintAddress;
     if (!smartContract.isAddress(mintAddress)) {
@@ -128,9 +128,9 @@ function amountAfterTax(x) {
       mintAddress: data.mintAddress,
       depositAddress: await dingo.getNewAddress()
     }));
-  });
+  }));
 
-  app.post('/registerMintDepositAddress', rateLimit({ windowMs: 20 * 1000, max: 1 }), async (req, res) => {
+  app.post('/registerMintDepositAddress', rateLimit({ windowMs: 20 * 1000, max: 1 }), asyncHandler(async (req, res, next) => {
     const data = req.body;
     if (data.generateDepositAddressResponses.length !== publicSettings.authorityNodes.length) {
       throw new Error('Incorrect authority count');
@@ -170,9 +170,9 @@ function amountAfterTax(x) {
     res.send(createSignedMessage({
       depositAddress: multisigDepositAddress
     }));
-  });
+  }));
 
-  app.post('/queryMintBalance', rateLimit({ windowMs: 10 * 1000, max: 10 }), async (req, res) => {
+  app.post('/queryMintBalance', rateLimit({ windowMs: 10 * 1000, max: 10 }), asyncHandler(async (req, res) => {
     const data = req.body;
     const mintAddress = data.mintAddress;
     if (!smartContract.isAddress(mintAddress)) {
@@ -200,9 +200,9 @@ function amountAfterTax(x) {
         mintedAmount: mintedAmount.toString()
       }));
     }
-  });
+  }));
 
-  app.post('/createMintTransaction', rateLimit({ windowMs: 5 * 1000, max: 1 }), async (req, res) => {
+  app.post('/createMintTransaction', rateLimit({ windowMs: 5 * 1000, max: 1 }), asyncHandler(async (req, res, next) => {
     const data = req.body;
     const mintAddress = data.mintAddress;
     if (!smartContract.isAddress(mintAddress)) {
@@ -234,9 +234,9 @@ function amountAfterTax(x) {
         s: signature.s
       }
     }));
-  });
+  }));
 
-  app.post('/queryBurnHistory', rateLimit({ windowMs: 10 * 1000, max: 10 }), async (req, res) => {
+  app.post('/queryBurnHistory', rateLimit({ windowMs: 10 * 1000, max: 10 }), asyncHandler(async (req, res, next) => {
     const data = req.body;
     const burnAddress = data.burnAddress;
     if (!smartContract.isAddress(burnAddress)) {
@@ -255,9 +255,9 @@ function amountAfterTax(x) {
     res.send(createSignedMessage({
       burnHistory: burnHistory
     }));
-  });
+  }));
 
-  app.post('/submitWithdrawal', rateLimit({ windowMs: 1 * 1000, max: 5 }), async (req, res) => {
+  app.post('/submitWithdrawal', rateLimit({ windowMs: 1 * 1000, max: 5 }), asyncHandler(async (req, res, next) => {
     const data = req.body;
     const burnAddress = data.burnAddress;
     const burnIndex = data.burnIndex;
@@ -283,12 +283,12 @@ function amountAfterTax(x) {
 
       }));
     });
-  });
+  }));
 
   app.post('/stats',
     rateLimit({ windowMs: 5 * 1000, max: 1 }),
     ipfilter(publicSettings.authorityNodes.map((x) => x.location).concat([LOCALHOST])),
-    async (req, res) => {
+    asyncHandler(async (req, res, next) => {
       const stats = {
         version: {
           repository: childProcess.execSync('git config --get remote.origin.url').toString().trim(),
@@ -351,10 +351,10 @@ function amountAfterTax(x) {
       });
 
       res.send(createSignedMessage(stats));
-    }
+    })
   );
 
-  app.post('/consensus', ipfilter([LOCALHOST]), async (req, res) => {
+  app.post('/consensus', ipfilter([LOCALHOST]), asyncHandler(async (req, res, next) => {
     const stats = await Promise.all(publicSettings.authorityNodes.map(
       async (x) => validateSignedMessage((await axios.post(`${getAuthorityLink(x)}/stats`)).data, x.walletAddress)));
 
@@ -546,7 +546,7 @@ function amountAfterTax(x) {
 
     s += '\n';
     res.send(s);
-  });
+  }));
 
 
 
@@ -743,7 +743,7 @@ function amountAfterTax(x) {
     await database.updateWithdrawals(withdrawals);
   };
 
-  app.post('/executePayouts', ipfilter([LOCALHOST]), async (req, res) => {
+  app.post('/executePayouts', ipfilter([LOCALHOST]), asyncHandler(async (req, res, next) => {
     let approvalChain = await database.acquire(async () => {
 
       const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts } = await computePendingPayouts();
@@ -794,9 +794,9 @@ function amountAfterTax(x) {
       transactionHash: hash
     }));
 
-  });
+  }));
 
-  app.post('/approvePayouts', ipfilter([publicSettings.authorityNodes[publicSettings.payoutCoordinator].location]), async (req, res) => {
+  app.post('/approvePayouts', ipfilter([publicSettings.authorityNodes[publicSettings.payoutCoordinator].location]), asyncHandler(async (req, res, next) => {
     await database.acquire(async () => {
       // Extract info.
       const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts, approvalChain } =
@@ -821,7 +821,7 @@ function amountAfterTax(x) {
 
       res.send(createSignedMessage({ approvalChain: approvalChainNext }));
     });
-  });
+  }));
 
   app.listen(publicSettings.port, () => {
     console.log(`Started on port ${publicSettings.port}`);
