@@ -1,3 +1,5 @@
+"use strict";
+
 const fs = require('fs');
 const request = require('request');
 const crypto = require('crypto');

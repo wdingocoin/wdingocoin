@@ -1,3 +1,5 @@
+"use strict";
+
 const express = require('express');
 const database = require('./database.js');
 const dingo = require('./dingo');
@@ -10,6 +12,7 @@ const rateLimit = require("express-rate-limit");
 const ipfilter = require('express-ipfilter').IpFilter
 const morgan = require('morgan');
 const Table = require('tty-table');
+const childProcess = require('child_process');
 
 const LOCALHOST = '127.0.0.1';
 
@@ -218,7 +221,7 @@ function amountAfterTax(x) {
 
     const mintAmount = (BigInt(depositedAmountAfterTax) - BigInt(mintedAmount)).toString();
 
-    const signature = smartContract.signMintTransaction(mintAddress, mintNonce, depositAddress, mintAmount);
+    const signature = smartContract.signMintTransaction(smartContractSettings.chainId, mintAddress, mintNonce, depositAddress, mintAmount);
 
     res.send(createSignedMessage({
       mintAddress: mintAddress,
@@ -286,48 +289,66 @@ function amountAfterTax(x) {
     rateLimit({ windowMs: 5 * 1000, max: 1 }),
     ipfilter(publicSettings.authorityNodes.map((x) => x.location).concat([LOCALHOST])),
     async (req, res) => {
-      const stats = { depositAddresses: {}, withdrawals: {}, utxos: {} };
+      const stats = {
+        version: {
+          repository: childProcess.execSync('git config --get remote.origin.url').toString().trim(),
+          hash: childProcess.execSync('git rev-parse HEAD').toString().trim(),
+          timestamp: parseInt(childProcess.execSync('git --no-pager log --pretty=format:"%at" -n1').toString().trim())
+        },
+        publicSettings: publicSettings,
+        dingoSettings: dingoSettings,
+        smartContractSettings: {
+          provider: smartContractSettings.provider,
+          chainId: smartContractSettings.chainId,
+          contractAddress: smartContractSettings.contractAddress
+        },
+        depositAddresses: {},
+        withdrawals: {},
+        utxos: {}
+      };
 
-      const depositAddresses = await database.getMintDepositAddresses();
-      stats.depositAddresses.count = depositAddresses.length;
-      const depositedAmounts = await dingo.getReceivedAmountByAddresses(dingoSettings.confirmations, depositAddresses.map((x) => x.depositAddress));
-      stats.depositAddresses.totalDepositedAmount = Object.values(depositedAmounts).reduce((a, b) => a + BigInt(dingo.toSatoshi(b.toString())), 0n).toString();
-      stats.depositAddresses.totalApprovableTax = Object.values(depositedAmounts).reduce((a, b) => {
-        const amount = BigInt(dingo.toSatoshi(b.toString()));
-        if (meetsTax(amount)) {
-          return a + BigInt(taxAmount(amount));
-        } else {
-          return a;
+      await database.acquire(async () => {
+        const depositAddresses = await database.getMintDepositAddresses();
+        stats.depositAddresses.count = depositAddresses.length;
+        const depositedAmounts = await dingo.getReceivedAmountByAddresses(dingoSettings.confirmations, depositAddresses.map((x) => x.depositAddress));
+        stats.depositAddresses.totalDepositedAmount = Object.values(depositedAmounts).reduce((a, b) => a + BigInt(dingo.toSatoshi(b.toString())), 0n).toString();
+        stats.depositAddresses.totalApprovableTax = Object.values(depositedAmounts).reduce((a, b) => {
+          const amount = BigInt(dingo.toSatoshi(b.toString()));
+          if (meetsTax(amount)) {
+            return a + BigInt(taxAmount(amount));
+          } else {
+            return a;
+          }
+        }, 0n).toString();
+        stats.depositAddresses.totalApprovedTax = depositAddresses.reduce((a, b) => a + BigInt(b.approvedTax), 0n).toString();
+        stats.depositAddresses.remainingApprovableTax = (BigInt(stats.depositAddresses.totalApprovableTax) - BigInt(stats.depositAddresses.totalApprovedTax)).toString();
+
+        const withdrawals = await database.getWithdrawals();
+        stats.withdrawals.count = withdrawals.length;
+        const burnAmounts = withdrawals.length === 0
+          ? []
+          : (await smartContract.getBurnHistoryMultiple(withdrawals.map((x) => x.burnAddress), withdrawals.map((x) => x.burnIndex))).burnAmounts;
+        stats.withdrawals.totalBurnedAmount = burnAmounts.reduce((a, b) => a + BigInt(b.toString()), 0n).toString();
+        stats.withdrawals.totalApprovableAmount = 0n;
+        stats.withdrawals.totalApprovedAmount = withdrawals.reduce((a, b) => a + BigInt(b.approvedAmount), 0n).toString();
+        stats.withdrawals.totalApprovableTax = 0n;
+        stats.withdrawals.totalApprovedTax = withdrawals.reduce((a, b) => a + BigInt(b.approvedTax), 0n).toString();
+        for (const b of burnAmounts) {
+          if (meetsTax(b)) {
+            stats.withdrawals.totalApprovableAmount += BigInt(amountAfterTax(b));
+            stats.withdrawals.totalApprovableTax += BigInt(taxAmount(b));
+          }
         }
-      }, 0n).toString();
-      stats.depositAddresses.totalApprovedTax = depositAddresses.reduce((a, b) => a + BigInt(b.approvedTax), 0n).toString();
-      stats.depositAddresses.remainingApprovableTax = (BigInt(stats.depositAddresses.totalApprovableTax) - BigInt(stats.depositAddresses.totalApprovedTax)).toString();
+        stats.withdrawals.totalApprovableAmount = stats.withdrawals.totalApprovableAmount.toString();
+        stats.withdrawals.totalApprovableTax = stats.withdrawals.totalApprovableTax.toString();
+        stats.withdrawals.remainingApprovableAmount = (BigInt(stats.withdrawals.totalApprovableAmount) - BigInt(stats.withdrawals.totalApprovedAmount)).toString();
+        stats.withdrawals.remainingApprovableTax = (BigInt(stats.withdrawals.totalApprovableTax) - BigInt(stats.withdrawals.totalApprovedTax)).toString();
 
-      const withdrawals = await database.getWithdrawals();
-      stats.withdrawals.count = withdrawals.length;
-      const burnAmounts = withdrawals.length === 0
-        ? []
-        : (await smartContract.getBurnHistoryMultiple(withdrawals.map((x) => x.burnAddress), withdrawals.map((x) => x.burnIndex))).burnAmounts;
-      stats.withdrawals.totalBurnedAmount = burnAmounts.reduce((a, b) => a + BigInt(b.toString()), 0n).toString();
-      stats.withdrawals.totalApprovableAmount = 0n;
-      stats.withdrawals.totalApprovedAmount = withdrawals.reduce((a, b) => a + BigInt(b.approvedAmount), 0n).toString();
-      stats.withdrawals.totalApprovableTax = 0n;
-      stats.withdrawals.totalApprovedTax = withdrawals.reduce((a, b) => a + BigInt(b.approvedTax), 0n).toString();
-      for (const b of burnAmounts) {
-        if (meetsTax(b)) {
-          stats.withdrawals.totalApprovableAmount += BigInt(amountAfterTax(b));
-          stats.withdrawals.totalApprovableTax += BigInt(taxAmount(b));
-        }
-      }
-      stats.withdrawals.totalApprovableAmount = stats.withdrawals.totalApprovableAmount.toString();
-      stats.withdrawals.totalApprovableTax = stats.withdrawals.totalApprovableTax.toString();
-      stats.withdrawals.remainingApprovableAmount = (BigInt(stats.withdrawals.totalApprovableAmount) - BigInt(stats.withdrawals.totalApprovedAmount)).toString();
-      stats.withdrawals.remainingApprovableTax = (BigInt(stats.withdrawals.totalApprovableTax) - BigInt(stats.withdrawals.totalApprovedTax)).toString();
-
-      const changeUtxos = await dingo.listUnspent(dingoSettings.confirmations, [dingoSettings.changeAddress]);
-      const depositUtxos = await dingo.listUnspent(dingoSettings.confirmations, depositAddresses.map((x) => x.depositAddress));
-      stats.utxos.totalChangeBalance = changeUtxos.reduce((a, b) => a + BigInt(dingo.toSatoshi(b.amount.toString())), 0n).toString();
-      stats.utxos.totalDepositsBalance = depositUtxos.reduce((a, b) => a + BigInt(dingo.toSatoshi(b.amount.toString())), 0n).toString();
+        const changeUtxos = await dingo.listUnspent(dingoSettings.confirmations, [dingoSettings.changeAddress]);
+        const depositUtxos = await dingo.listUnspent(dingoSettings.confirmations, depositAddresses.map((x) => x.depositAddress));
+        stats.utxos.totalChangeBalance = changeUtxos.reduce((a, b) => a + BigInt(dingo.toSatoshi(b.amount.toString())), 0n).toString();
+        stats.utxos.totalDepositsBalance = depositUtxos.reduce((a, b) => a + BigInt(dingo.toSatoshi(b.amount.toString())), 0n).toString();
+      });
 
       res.send(createSignedMessage(stats));
     }
@@ -337,9 +358,8 @@ function amountAfterTax(x) {
     const stats = await Promise.all(publicSettings.authorityNodes.map(
       async (x) => validateSignedMessage((await axios.post(`${getAuthorityLink(x)}/stats`)).data, x.walletAddress)));
 
+    // Shared configurations.
     const dingoWidth = 20;
-    let s = '';
-
     function consensusCell (cell, columnIndex, rowIndex, rowData) {
       if (rowData.length === 0) {
         return this.style('YES', 'bgGreen', 'black');
@@ -353,14 +373,100 @@ function amountAfterTax(x) {
       }
       return this.style('YES', 'bgGreen', 'black');
     }
+    const nodeHeader = { alias: "Node", width: 11, formatter: function (x) { return this.style(x, "bgWhite", "black"); }};
 
-    const footer = [
-      "Consensus",
-      function (cellValue, columnIndex, rowIndex, rowData) {
-        return 'YES';
-      }
+    let s = '';
+
+
+    // Version info.
+    const versionFlattened = [];
+    for (const i in stats) {
+      const stat = stats[i];
+      versionFlattened.push([
+        i,
+        stat.version.repository.toString(),
+        stat.version.hash.toString(),
+       (new Date(stat.version.timestamp * 1000)).toUTCString()
+      ]);
+    }
+    const versionHeader = [
+      nodeHeader,
+      { alias: 'Repository' },
+      { alias: 'Commit Hash' },
+      { alias: 'Commit Timestamp' }
     ];
+    const versionFooter = ['Consensus'].concat(Array(versionHeader.length - 1).fill(consensusCell));
+    s += '  [Version]'
+    s += Table(versionHeader, versionFlattened, versionFooter).render();
 
+
+    // Public Settings info.
+    const publicSettingsFlattened = [];
+    for (const i in stats) {
+      const stat = stats[i];
+      publicSettingsFlattened.push([
+        i,
+        stat.publicSettings.payoutCoordinator.toString(),
+        stat.publicSettings.authorityThreshold.toString(),
+        stat.publicSettings.authorityNodes.map((x) => `${x.location}:${x.port}\\${x.walletAddress}`).join(' ')
+      ]);
+    }
+    const publicSettingsHeader = [
+      nodeHeader,
+      { alias: 'Payout Coordinator' },
+      { alias: 'Authority Threshold' },
+      { alias: 'Authority Nodes', width: 70 }
+    ];
+    const publicSettingsFooter = ['Consensus'].concat(Array(publicSettingsHeader.length - 1).fill(consensusCell));
+    s += '\n\n  [Public Settings]'
+    s += Table(publicSettingsHeader, publicSettingsFlattened, publicSettingsFooter).render();
+
+
+    // Dingo settings.
+    const dingoSettingsFlattened = [];
+    for (const i in stats) {
+      const stat = stats[i];
+      dingoSettingsFlattened.push([
+        i,
+        stat.dingoSettings.changeAddress,
+        stat.dingoSettings.confirmations.toString(),
+        stat.dingoSettings.taxPayoutAddresses.join(' ')
+      ]);
+    }
+    const dingoSettingsHeader = [
+      nodeHeader,
+      { alias: 'Change Address' },
+      { alias: 'Confirmations' },
+      { alias: 'Tax Payout Addresses', width: 45 }
+    ];
+    const dingoSettingsFooter = ['Consensus'].concat(Array(dingoSettingsHeader.length - 1).fill(consensusCell));
+    s += '\n\n  [Dingo Settings]'
+    s += Table(dingoSettingsHeader, dingoSettingsFlattened, dingoSettingsFooter).render();
+
+
+    // Smart contract settings.
+    const smartContractSettingsFlattened = [];
+    for (const i in stats) {
+      const stat = stats[i];
+      smartContractSettingsFlattened.push([
+        i,
+        stat.smartContractSettings.provider,
+        stat.smartContractSettings.chainId,
+        stat.smartContractSettings.contractAddress
+      ]);
+    }
+    const smartContractSettingsHeader = [
+      nodeHeader,
+      { alias: 'Provider' },
+      { alias: 'Chain ID' },
+      { alias: 'Contract Address' }
+    ];
+    const smartContractSettingsFooter = ['Consensus'].concat(Array(smartContractSettingsHeader.length - 1).fill(consensusCell));
+    s += '\n\n  [Smart Contract Settings]'
+    s += Table(smartContractSettingsHeader, smartContractSettingsFlattened, smartContractSettingsFooter).render();
+
+
+    // Deposits.
     const depositStatsFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
@@ -374,7 +480,7 @@ function amountAfterTax(x) {
       ]);
     }
     const depositHeader = [
-      { alias: "Node", width: 11, formatter: function (x) { return this.style(x, "bgWhite", "black"); }},
+      nodeHeader,
       { alias: "Addresses" },
       { alias: "Total Deposited", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
@@ -382,9 +488,11 @@ function amountAfterTax(x) {
       { alias: "Remaining Tax", formatter: dingo.fromSatoshi, width: dingoWidth }
     ];
     const depositFooter = ['Consensus'].concat(Array(depositHeader.length - 1).fill(consensusCell));
-    s += '  [Deposit Addresses]';
+    s += '\n\n  [Deposit Addresses]';
     s += Table(depositHeader, depositStatsFlattened, depositFooter, { truncate: '...' }).render();
 
+
+    // Withdrawals.
     const withdrawalStatsFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
@@ -401,7 +509,7 @@ function amountAfterTax(x) {
       ]);
     }
     const withdrawalHeader = [
-      { alias: "Node", width: 11, formatter: function (x) { return this.style(x, "bgWhite", "black"); }},
+      nodeHeader,
       { alias: "Submissions" },
       { alias: "Total Burned", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Approved Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
@@ -415,6 +523,8 @@ function amountAfterTax(x) {
     s += '\n\n  [Submitted Withdrawals]';
     s += Table(withdrawalHeader, withdrawalStatsFlattened, withdrawalFooter, { truncate: '...' }).render();
 
+
+    // UTXOs.
     const utxoStatsFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
@@ -425,15 +535,16 @@ function amountAfterTax(x) {
       ]);
     }
     const utxoHeader = [
-      { alias: "Node", width: 11, formatter: function (x) { return this.style(x, "bgWhite", "black"); }},
+      nodeHeader,
       { alias: "Change Balance", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Deposits Balance", formatter: dingo.fromSatoshi, width: dingoWidth },
     ];
     const utxoFooter = ['Consensus'].concat(Array(utxoHeader.length - 1).fill(consensusCell));
     s += '\n\n  [UTXOs]';
     s += Table(utxoHeader, utxoStatsFlattened, utxoFooter, { truncate: '...' }).render();
-    s += '\n';
 
+
+    s += '\n';
     res.send(s);
   });
 
