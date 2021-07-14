@@ -337,47 +337,36 @@ function amountAfterTax(x) {
     const stats = await Promise.all(publicSettings.authorityNodes.map(
       async (x) => validateSignedMessage((await axios.post(`${getAuthorityLink(x)}/stats`)).data, x.walletAddress)));
 
-    const consensusStats = [];
-    const consensusNodes = [];
+    const dingoWidth = 20;
+    let s = '';
 
-    const statsEquals = (a, b) => {
-      return a.depositAddresses.count === b.depositAddresses.count
-        && a.depositAddresses.totalDepositedAmount === b.depositAddresses.totalDepositedAmount
-        && a.depositAddresses.totalApprovableTax === b.depositAddresses.totalApprovableTax
-        && a.depositAddresses.totalApprovedTax === b.depositAddresses.totalApprovedTax
-        && a.withdrawals.count === b.withdrawals.count
-        && a.withdrawals.totalBurnedAmount === b.withdrawals.totalBurnedAmount
-        && a.withdrawals.totalApprovableAmount === b.withdrawals.totalApprovableAmount
-        && a.withdrawals.totalApprovedAmount === b.withdrawals.totalApprovedAmount
-        && a.withdrawals.totalApprovableTax === b.withdrawals.totalApprovableTax
-        && a.withdrawals.totalApprovedTax === b.withdrawals.totalApprovedTax
-        && a.utxos.totalChangeBalance === b.utxos.totalChangeBalance
-        && a.utxos.totalDepositsBalance === b.utxos.totalDepositsBalance;
-    };
+    function consensusCell (cell, columnIndex, rowIndex, rowData) {
+      if (rowData.length === 0) {
+        return this.style('YES', 'bgGreen', 'black');
+      }
 
-    for (const i in publicSettings.authorityNodes) {
-      let hasConsensus = false;
-      for (const j in consensusStats) {
-        if (statsEquals(stats[i], consensusStats[j])) {
-          consensusNodes[j].push(i);
-          hasConsensus = true;
-          break;
+      let allSame = true;
+      for (const row of rowData) {
+        if (row[columnIndex] !== rowData[0][columnIndex]) {
+          return this.style('NO', 'bgRed', 'black');
         }
       }
-      if (!hasConsensus) {
-        consensusStats.push(stats[i]);
-        consensusNodes.push([i]);
-      }
+      return this.style('YES', 'bgGreen', 'black');
     }
 
-    const dingoWidth = 17;
+    const footer = [
+      "Consensus",
+      function (cellValue, columnIndex, rowIndex, rowData) {
+        return 'YES';
+      }
+    ];
 
     const depositStatsFlattened = [];
     for (const i in stats) {
       const stat = stats[i];
       depositStatsFlattened.push([
         i,
-        stat.depositAddresses.count,
+        stat.depositAddresses.count.toString(),
         stat.depositAddresses.totalDepositedAmount,
         stat.depositAddresses.totalApprovedTax,
         stat.depositAddresses.totalApprovableTax,
@@ -385,14 +374,16 @@ function amountAfterTax(x) {
       ]);
     }
     const depositHeader = [
-      { alias: "Node", formatter: function (x) { return this.style(x, "bgGreen", "black"); }},
+      { alias: "Node", width: 11, formatter: function (x) { return this.style(x, "bgWhite", "black"); }},
       { alias: "Addresses" },
       { alias: "Total Deposited", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Approvable Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Remaining Tax", formatter: dingo.fromSatoshi, width: dingoWidth }
     ];
-    console.log(Table(depositHeader, depositStatsFlattened).render());
+    const depositFooter = ['Consensus'].concat(Array(depositHeader.length - 1).fill(consensusCell));
+    s += '  [Deposit Addresses]';
+    s += Table(depositHeader, depositStatsFlattened, depositFooter, { truncate: '...' }).render();
 
     const withdrawalStatsFlattened = [];
     for (const i in stats) {
@@ -410,47 +401,38 @@ function amountAfterTax(x) {
       ]);
     }
     const withdrawalHeader = [
-      { alias: "Node", formatter: function (x) { return this.style(x, "bgGreen", "black"); }},
-      { alias: "Count", formatter: function(x) { return x.toString(); } },
+      { alias: "Node", width: 11, formatter: function (x) { return this.style(x, "bgWhite", "black"); }},
+      { alias: "Submissions" },
       { alias: "Total Burned", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approved Withdrawals", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approvable Withdrawals", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Remaining Withdrawals", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approved Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approvable Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Remaining Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Approvable Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Remaining Tax", formatter: dingo.fromSatoshi, width: dingoWidth }
     ];
-    console.log(Table(withdrawalHeader, withdrawalStatsFlattened).render());
+    const withdrawalFooter = ['Consensus'].concat(Array(withdrawalHeader.length - 1).fill(consensusCell));
+    s += '\n\n  [Submitted Withdrawals]';
+    s += Table(withdrawalHeader, withdrawalStatsFlattened, withdrawalFooter, { truncate: '...' }).render();
 
-    let s = '';
-    for (const i in consensusStats) {
-      s += `============= CONSENSUS ${i} [${consensusNodes[i].length}/${publicSettings.authorityNodes.length}] ===============\n`;
-      s += '[DEPOSIT ADDRESSES]\n';
-      s += `  Count: ${consensusStats[i].depositAddresses.count}\n`
-      s += `  Total deposited amount: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalDepositedAmount)}\n`;
-      s += `  Total tax (approved/approvable): ${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalApprovedTax)} / `;
-      s += `${dingo.fromSatoshi(consensusStats[i].depositAddresses.totalApprovableTax)}`;
-      s += ` (Remaining: ${dingo.fromSatoshi(consensusStats[i].depositAddresses.remainingApprovableTax)})\n`;
-      s += '[WITHDRAWALS]\n';
-      s += `  Count: ${consensusStats[i].withdrawals.count}\n`;
-      s += `  Total burned amount: ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalBurnedAmount)}\n`
-      s += `  Total withdrawal (approved/approvable): ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedAmount)} / `;
-      s += `${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovableAmount)}`;
-      s += ` (Remaining: ${dingo.fromSatoshi(consensusStats[i].withdrawals.remainingApprovableAmount)})\n`;
-      s += `  Total tax (approved/approvable): ${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovedTax)} / `;
-      s += `${dingo.fromSatoshi(consensusStats[i].withdrawals.totalApprovableTax)}`;
-      s += ` (Remaining: ${dingo.fromSatoshi(consensusStats[i].withdrawals.remainingApprovableTax)})\n`;
-      s += '[UTXOS]\n'
-      s += `  Change balance: ${dingo.fromSatoshi(consensusStats[i].utxos.totalChangeBalance)} (${dingoSettings.changeAddress})\n`;
-      s += `  Deposits balance: ${dingo.fromSatoshi(consensusStats[i].utxos.totalDepositsBalance)}\n`;
-      s += '[NODES IN CONSENSUS]\n';
-      for (const j of consensusNodes[i]) {
-        s += `  Node ${j}: ${publicSettings.authorityNodes[j].location} (${publicSettings.authorityNodes[j].walletAddress})\n`;
-      }
-      if (i == publicSettings.authorityNodes.length - 1) {
-        s += '===============================================\n';
-      }
+    const utxoStatsFlattened = [];
+    for (const i in stats) {
+      const stat = stats[i];
+      utxoStatsFlattened.push([
+        i,
+        stat.utxos.totalChangeBalance,
+        stat.utxos.totalDepositsBalance
+      ]);
     }
+    const utxoHeader = [
+      { alias: "Node", width: 11, formatter: function (x) { return this.style(x, "bgWhite", "black"); }},
+      { alias: "Change Balance", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Deposits Balance", formatter: dingo.fromSatoshi, width: dingoWidth },
+    ];
+    const utxoFooter = ['Consensus'].concat(Array(utxoHeader.length - 1).fill(consensusCell));
+    s += '\n\n  [UTXOs]';
+    s += Table(utxoHeader, utxoStatsFlattened, utxoFooter, { truncate: '...' }).render();
+    s += '\n';
 
     res.send(s);
   });
