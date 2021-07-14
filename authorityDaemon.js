@@ -474,8 +474,8 @@ function amountAfterTax(x) {
         i,
         stat.depositAddresses.count.toString(),
         stat.depositAddresses.totalDepositedAmount,
-        stat.depositAddresses.totalApprovedTax,
         stat.depositAddresses.totalApprovableTax,
+        stat.depositAddresses.totalApprovedTax,
         stat.depositAddresses.remainingApprovableTax
       ]);
     }
@@ -483,8 +483,8 @@ function amountAfterTax(x) {
       nodeHeader,
       { alias: "Addresses" },
       { alias: "Total Deposited", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Approvable Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Remaining Tax", formatter: dingo.fromSatoshi, width: dingoWidth }
     ];
     const depositFooter = ['Consensus'].concat(Array(depositHeader.length - 1).fill(consensusCell));
@@ -500,11 +500,11 @@ function amountAfterTax(x) {
         i,
         stat.withdrawals.count.toString(),
         stat.withdrawals.totalBurnedAmount,
-        stat.withdrawals.totalApprovedAmount,
         stat.withdrawals.totalApprovableAmount,
+        stat.withdrawals.totalApprovedAmount,
         stat.withdrawals.remainingApprovableAmount,
-        stat.withdrawals.totalApprovedTax,
         stat.withdrawals.totalApprovableTax,
+        stat.withdrawals.totalApprovedTax,
         stat.withdrawals.remainingApprovableTax
       ]);
     }
@@ -512,11 +512,11 @@ function amountAfterTax(x) {
       nodeHeader,
       { alias: "Submissions" },
       { alias: "Total Burned", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approved Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Approvable Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approved Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Remaining Amount", formatter: dingo.fromSatoshi, width: dingoWidth },
-      { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Approvable Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
+      { alias: "Approved Tax", formatter: dingo.fromSatoshi, width: dingoWidth },
       { alias: "Remaining Tax", formatter: dingo.fromSatoshi, width: dingoWidth }
     ];
     const withdrawalFooter = ['Consensus'].concat(Array(withdrawalHeader.length - 1).fill(consensusCell));
@@ -744,9 +744,17 @@ function amountAfterTax(x) {
   };
 
   app.post('/executePayouts', ipfilter([LOCALHOST]), asyncHandler(async (req, res, next) => {
-    let approvalChain = await database.acquire(async () => {
+    let depositTaxPayouts = undefined;
+    let withdrawalPayouts = undefined;
+    let withdrawalTaxPayouts = undefined;
+    let approvalChain = undefined;
 
-      const { depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts } = await computePendingPayouts();
+    await database.acquire(async () => {
+
+      const pendingPayouts = await computePendingPayouts();
+      depositTaxPayouts = pendingPayouts.depositTaxPayouts;
+      withdrawalPayouts = pendingPayouts.withdrawalPayouts;
+      withdrawalTaxPayouts = pendingPayouts.withdrawalTaxPayouts;
 
       const totalDepositTaxPayout = depositTaxPayouts.reduce((a, b) => a + BigInt(b.amount), 0n).toString();
       const totalWithdrawalPayout = withdrawalPayouts.reduce((a, b) => a + BigInt(b.amount), 0n).toString();
@@ -759,7 +767,7 @@ function amountAfterTax(x) {
       const { unspent, vouts } = await computeUnspentAndVouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
 
       // Compute approval chain.
-      return await dingo.createRawTransaction(
+      approvalChain = await dingo.createRawTransaction(
         unspent, vouts,
         {
           depositTaxPayouts: depositTaxPayouts,
@@ -775,9 +783,9 @@ function amountAfterTax(x) {
       console.log(`Requesting approval from Node ${i} at ${node.location} (${node.walletAddress})...`);
       approvalChain = validateSignedMessage(
         (await axios.post(`${getAuthorityLink(node)}/approvePayouts`, createSignedMessage({
-          depositTaxPayouts,
-          withdrawalPayouts,
-          withdrawalTaxPayouts,
+          depositTaxPayouts: depositTaxPayouts,
+          withdrawalPayouts: withdrawalPayouts,
+          withdrawalTaxPayouts: withdrawalTaxPayouts,
           approvalChain: approvalChain
         }))).data,
         node.walletAddress
@@ -814,7 +822,9 @@ function amountAfterTax(x) {
         {
           depositTaxPayouts: depositTaxPayouts,
           withdrawalPayouts: withdrawalPayouts,
-          withdrawalTaxPayouts: withdrawalTaxPayouts
+          withdrawalTaxPayouts: withdrawalTaxPayouts,
+          unspent: unspent,
+          vouts: vouts
         }, approvalChain);
 
       await applyPayouts(depositTaxPayouts, withdrawalPayouts, withdrawalTaxPayouts);
