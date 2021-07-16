@@ -1,0 +1,34 @@
+SETUP INSTRUCTIONS:
+
+1. Add Change addres to dingo wallet:
+- Run `./dingocoin-cli addmultisigaddress 3 "[\"034db16180d9c603c54a29a481362d975f06fc78298d10ac7c5b8ce4c0400b6093\", \"03c0ef9df24b3ab410b615aaf8c8aa8257e2686b48d6643f0a8f58434dced9ea33\", \"0324e074121a598f21ab73f0a9807a89c72e39a10c84d5f58b5da81a2fe6c0cdf8\", \"0227f452ec09b0d887307682ed8db0655a57457771594bf654bb521cc8990f7bee\", \"03a31cf9099bc1be843afb97d28376824fea7788712976add883abfe9aceffcb82\"]"`
+- Ensure that the output is `9rUZv4sr7pgqhmw7Q9XLDb42w9EcUkUZCc`. This will be the CHANGE_ADDRESS where all holdings are collated at every payout.
+
+2. Add BSC private key.
+- In `settings/private.DO_NOT_SHARE_THIS.json`, replace the entry for `walletPrivateKey` with your BSC_WALLET_PRIVATE_KEY (e.g. "walletPrivateKey:": "0x12341234123412341234").
+- DO NOT REVEAL THIS AT ALL COSTS.
+
+3. Create your database to record payouts history.
+- Install `sqlite3`: `sudo apt install sqlite3`
+- Go to the `settings/database` folder: `cd settings/database`
+- Create the database file and enter sqlite3 console: `sqlite3 wDingo.db`
+- Run the initialization script: `.read schema_authority.sql`
+
+4. VERIFY THE SHARED CREDENTIALS!
+- In `settings/public.json`, check that the IP locations and BSC wallet addresses of every node match the collected list.
+- In `settings/dingo.json`, check that the change address matches the one computed in step 1 (`9rUZv4sr7pgqhmw7Q9XLDb42w9EcUkUZCc`), and that the tax payour addresses match the collected list.
+- In `settings/smartContract.js`, check that the contractAddress is what has just been published, `0x6ABbb148CAFe876f212E115c18224b30B6e9cf04`.
+
+5. VERIFY SMART CONTRACT!
+- You can explore the BSC Smart Contract here: `https://bscscan.com/token/0x6ABbb148CAFe876f212E115c18224b30B6e9cf04`. For the folks who are new to this, this is basically like blockexplorer but you see all interactions with the smart contract.
+- The Smart Contract source code has been uploaded and verified here: `https://bscscan.com/address/0x6ABbb148CAFe876f212E115c18224b30B6e9cf04#code`.
+- Verify that the `_authorityAddresses` (Line 122) has been set to the BSC wallet addresses in the collected list.
+- If you are up for it, you can read through the smartContract to verify the multisignature design.
+
+6. Install nodejs and yarn, and setup project dependencies.
+- `sudo apt install nodejs npm`
+- `sudo npm install -g yarn`
+- In the root of the project folder: `yarn install`
+
+7. Launch authority daemon.
+- `nodejs authorityDaemon.js`

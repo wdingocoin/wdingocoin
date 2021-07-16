@@ -1,5 +1,3 @@
-// TODO: ADD NONCE TO CONFIGURATION
-
 pragma solidity 0.8.4;
 
 interface IBEP20 {
@@ -118,11 +116,13 @@ contract BEP20Token is Context, IBEP20 {
     _totalSupply = 0;
 
     _authorityAddresses = [
-      0x4aD13Eb83f132D6aaBAef25f7A1F45397cDdd65d,
-      0xa04e2A329e1612120c481E4DcA39B13Ae1CC1FEd,
-      0xd774Ddde4b5879837E715a8631F8795ef0f2AaCb
+      0x0bee89d055Bc18250C71B72B2e24EcF723e9a8ef,
+      0xD14Bc59472b8f1fA5baA99a17855d06aD327dCae,
+      0x3279f7B244F0194fd359D5AC29359ca676193aDb,
+      0x9d046eDc2C80727259355E4CFBb8B72750348Ad9,
+      0x5234B6a4df31598dc4B26183ad7C452E47AB267F
     ];
-    _authorityThreshold = 2;
+    _authorityThreshold = 3;
     _minBurnAmount = 1000000000;
     _configurationNonce = 0;
     _chainId = 56;
