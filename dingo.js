@@ -184,6 +184,12 @@ async function verifyAndSignRawTransaction(unspent, payouts, data, hex) {
   const hash = crypto.createHash('sha256');
   hash.update(JSON.stringify(data));
   const hashDigested = hash.digest('hex');
+  console.log('data');
+  console.log(data);
+  console.log('hashDigested');
+  console.log(hashDigested);
+  console.log('scriptPubKeyHex');
+  console.log(getDataVout(tx.vout).scriptPubKey.hex);
   if (getDataVout(tx.vout).scriptPubKey.hex.slice(4) !== hashDigested) {
     throw new Error('Payouts data mismatch');
   }
@@ -195,7 +201,9 @@ async function verifyAndSignRawTransaction(unspent, payouts, data, hex) {
     }
   }
 
-  return (await signRawTransaction(hex)).hex;
+  const result = (await signRawTransaction(hex));
+  console.log(result);
+  return result.hex;
 }
 
 function sendRawTranscation(hex) {

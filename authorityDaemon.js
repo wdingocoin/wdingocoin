@@ -162,6 +162,7 @@ function amountAfterTax(x) {
       const multisigDepositAddress = await dingo.addMultisigAddress(
         publicSettings.authorityThreshold, depositAddresses
       );
+      await dingo.importAddress(multisigDepositAddress);
 
       // Register mintDepositAddress.
       await database.registerMintDepositAddress(mintAddress, multisigDepositAddress);
@@ -826,7 +827,7 @@ function amountAfterTax(x) {
           depositTaxPayouts: depositTaxPayouts,
           withdrawalPayouts: withdrawalPayouts,
           withdrawalTaxPayouts: withdrawalTaxPayouts,
-          unspent: unspent,
+          unspent: unspent.map((x) => ({ txid: x.txid, vout: x.vout, address: x.address, scriptPubKey: x.scriptPubKey, amount: x.amount })),
           vouts: vouts
         });
     });
@@ -844,6 +845,7 @@ function amountAfterTax(x) {
         node.walletAddress
       ).approvalChain;
       console.log('  -> Success!');
+      console.log(approvalChain);
     }
 
     console.log(`Sending raw transaction:\n${approvalChain}`);
@@ -876,7 +878,7 @@ function amountAfterTax(x) {
           depositTaxPayouts: depositTaxPayouts,
           withdrawalPayouts: withdrawalPayouts,
           withdrawalTaxPayouts: withdrawalTaxPayouts,
-          unspent: unspent,
+          unspent: unspent.map((x) => ({ txid: x.txid, vout: x.vout, address: x.address, scriptPubKey: x.scriptPubKey, amount: x.amount })),
           vouts: vouts
         }, approvalChain);
 
