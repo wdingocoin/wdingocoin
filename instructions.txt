@@ -1,5 +1,7 @@
 SETUP INSTRUCTIONS:
 
+0. Clone this repository somewhere.
+
 1. Add Change addres to dingo wallet:
 - Run `./dingocoin-cli addmultisigaddress 3 "[\"034db16180d9c603c54a29a481362d975f06fc78298d10ac7c5b8ce4c0400b6093\", \"03c0ef9df24b3ab410b615aaf8c8aa8257e2686b48d6643f0a8f58434dced9ea33\", \"0324e074121a598f21ab73f0a9807a89c72e39a10c84d5f58b5da81a2fe6c0cdf8\", \"0227f452ec09b0d887307682ed8db0655a57457771594bf654bb521cc8990f7bee\", \"03a31cf9099bc1be843afb97d28376824fea7788712976add883abfe9aceffcb82\"]"`
 - Ensure that the output is `9rUZv4sr7pgqhmw7Q9XLDb42w9EcUkUZCc`. This will be the CHANGE_ADDRESS where all holdings are collated at every payout.
