@@ -50,10 +50,10 @@ async function registerUsedDepositAddresses(depositAddresses) {
   statement.finalize();
 }
 
-function registerMintDepositAddress(mintAddress, depositAddress) {
+function registerMintDepositAddress(mintAddress, depositAddress, redeemScript) {
   return util.promisify(db.run.bind(db))(
-    'INSERT INTO mintDepositAddresses (mintAddress, depositAddress) VALUES (?, ?)',
-    [mintAddress, depositAddress]
+    'INSERT INTO mintDepositAddresses (mintAddress, depositAddress, redeemScript) VALUES (?, ?, ?)',
+    [mintAddress, depositAddress, redeemScript]
   );
 }
 

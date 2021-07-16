@@ -159,13 +159,13 @@ function amountAfterTax(x) {
       await database.registerUsedDepositAddresses(depositAddresses);
 
       // Compute multisigDepositAddress.
-      const multisigDepositAddress = await dingo.addMultisigAddress(
+      const { address: multisigDepositAddress, redeemScript } = await dingo.createMultisig(
         publicSettings.authorityThreshold, depositAddresses
       );
-      await dingo.importAddress(multisigDepositAddress);
+      await dingo.importAddress(redeemScript);
 
       // Register mintDepositAddress.
-      await database.registerMintDepositAddress(mintAddress, multisigDepositAddress);
+      await database.registerMintDepositAddress(mintAddress, multisigDepositAddress, redeemScript);
 
       return multisigDepositAddress;
     });

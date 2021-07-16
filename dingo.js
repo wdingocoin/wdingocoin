@@ -16,7 +16,7 @@ module.exports = {
   verifyAddress,
   getTransaction,
   getNewAddress,
-  addMultisigAddress,
+  createMultisig,
   importAddress,
   listReceivedByAddress,
   getReceivedAmountByAddress,
@@ -90,12 +90,12 @@ async function getNewAddress() {
   return (await callRpc('validateaddress', [await callRpc('getnewaddress', [])])).pubkey;
 }
 
-async function addMultisigAddress(n, individualAddresses) {
-  return (await callRpc('addmultisigaddress', [n, individualAddresses]));
+function createMultisig(n, individualAddresses) {
+  return callRpc('createmultisig', [n, individualAddresses]);
 }
 
-async function importAddress(address) {
-  return callRpc('importaddress', [address, '', false]);
+async function importAddress(redeemScript) {
+  return callRpc('importaddress', [redeemScript, '', false, true]);
 }
 
 async function listReceivedByAddress(confirmations) {
@@ -184,12 +184,6 @@ async function verifyAndSignRawTransaction(unspent, payouts, data, hex) {
   const hash = crypto.createHash('sha256');
   hash.update(JSON.stringify(data));
   const hashDigested = hash.digest('hex');
-  console.log('data');
-  console.log(data);
-  console.log('hashDigested');
-  console.log(hashDigested);
-  console.log('scriptPubKeyHex');
-  console.log(getDataVout(tx.vout).scriptPubKey.hex);
   if (getDataVout(tx.vout).scriptPubKey.hex.slice(4) !== hashDigested) {
     throw new Error('Payouts data mismatch');
   }
@@ -202,7 +196,6 @@ async function verifyAndSignRawTransaction(unspent, payouts, data, hex) {
   }
 
   const result = (await signRawTransaction(hex));
-  console.log(result);
   return result.hex;
 }
 

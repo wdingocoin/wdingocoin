@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS mintDepositAddresses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   mintAddress TEXT NOT NULL UNIQUE,
   depositAddress TEXT NOT NULL UNIQUE,
+  redeemScript TEXT NOT NULL,
   approvedTax TEXT NOT NULL DEFAULT "0"
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mintDepositAddresses_mintAddress ON mintDepositAddresses (mintAddress);
