@@ -296,7 +296,8 @@ function amountAfterTax(x) {
         version: {
           repository: childProcess.execSync('git config --get remote.origin.url').toString().trim(),
           hash: childProcess.execSync('git rev-parse HEAD').toString().trim(),
-          timestamp: parseInt(childProcess.execSync('git --no-pager log --pretty=format:"%at" -n1').toString().trim())
+          timestamp: parseInt(childProcess.execSync('git --no-pager log --pretty=format:"%at" -n1').toString().trim()),
+          clean: childProcess.execSync('git diff --stat').toString().trim() === ''
         },
         publicSettings: publicSettings,
         dingoSettings: dingoSettings,
@@ -415,7 +416,8 @@ function amountAfterTax(x) {
           i,
           stat.version.repository.toString(),
           stat.version.hash.toString(),
-         (new Date(stat.version.timestamp * 1000)).toUTCString()
+         (new Date(stat.version.timestamp * 1000)).toUTCString(),
+          stat.version.clean ? 'Yes' : 'No'
         ]);
       }
     }
@@ -423,9 +425,10 @@ function amountAfterTax(x) {
       nodeHeader,
       { alias: 'Repository' },
       { alias: 'Commit Hash' },
-      { alias: 'Commit Timestamp' }
+      { alias: 'Commit Timestamp' },
+      { alias: 'Clean', formatter: function (x) { return x === 'Yes' ? this.style('YES', 'bgGreen', 'black') :  this.style('NO', 'bgRed', 'black'); }  }
     ];
-    const versionFooter = ['Consensus'].concat(Array(versionHeader.length - 1).fill(consensusCell));
+    const versionFooter = ['Consensus'].concat(Array(versionHeader.length - 2).fill(consensusCell)).concat([function (cell, columnIndex, rowIndex, rowData) { return ''; }]);
     s += '  [Version]'
     s += Table(versionHeader, versionFlattened, versionFooter).render();
 
