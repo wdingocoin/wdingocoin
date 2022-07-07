@@ -1,0 +1,4 @@
+{
+  "certPath": "/etc/letsencrypt/live/n4.dingocoin.org/fullchain.pem",
+  "keyPath": "/etc/letsencrypt/live/n4.dingocoin.org/privkey.pem"
+}

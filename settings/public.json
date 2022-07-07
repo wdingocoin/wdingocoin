@@ -1,0 +1,34 @@
+
+
+{
+  "port": 8443,
+  "authorityThreshold": 3,
+  "authorityNodes": [
+    {
+      "hostname": "n0.dingocoin.org",
+      "port": 8443,
+      "walletAddress": "0x0bee89d055Bc18250C71B72B2e24EcF723e9a8ef"
+    },
+    {
+      "hostname": "n1.dingocoin.org",
+      "port": 8443,
+      "walletAddress": "0xD14Bc59472b8f1fA5baA99a17855d06aD327dCae"
+    },
+    {
+      "hostname": "n2.dingocoin.org",
+      "port": 8443,
+      "walletAddress": "0x3279f7B244F0194fd359D5AC29359ca676193aDb"
+    },
+    {
+      "hostname": "n3.dingocoin.org",
+      "port": 8443,
+      "walletAddress": "0x9d046eDc2C80727259355E4CFBb8B72750348Ad9"
+    },
+    {
+      "hostname": "n4.dingocoin.org",
+      "port": 8443,
+      "walletAddress": "0x5234B6a4df31598dc4B26183ad7C452E47AB267F"
+    }
+  ],
+  "payoutCoordinator": 4
+}
